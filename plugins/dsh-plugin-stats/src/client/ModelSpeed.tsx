@@ -79,7 +79,7 @@ export function ModelSpeed({ React, t, url, refresh }: {
                 <tr key={JSON.stringify([row.provider, row.model])}>
                   <td><strong>{row.model}</strong><small>{row.provider}</small></td>
                   <td>{formatMs(row.ttftMs)}<small>{t('speedSamples', { n: row.ttftSamples })}</small></td>
-                  <td>{rateText(row.generationTps)}<small>{t('speedSamples', { n: row.tpsSamples })}</small></td>
+                  <td>{rateText(row.generationTps)}<small>{t('speedSamples', { n: row.generationSamples })}</small></td>
                   <td>{rateText(row.endToEndTps)}<small>{t('speedSamples', { n: row.tpsSamples })}</small></td>
                   <td>{numberText(row.requests)}</td>
                   <td>{numberText(row.outputTokens)}</td>

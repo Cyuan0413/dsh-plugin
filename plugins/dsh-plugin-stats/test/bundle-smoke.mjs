@@ -37,7 +37,7 @@ test('built stats bundle renders the model-speed response', async (t) => {
       assert.equal(url.searchParams.get('hours'), '24')
       return Response.json({ asOf: 100, rows: [{
         provider: 'fixture-provider', model: 'fixture-model', requests: 3, outputTokens: 300,
-        ttftSamples: 3, tpsSamples: 3, ttftMs: 1000, generationTps: 42, endToEndTps: 31,
+        ttftSamples: 3, generationSamples: 1, tpsSamples: 3, ttftMs: 1000, generationTps: 42, endToEndTps: 31,
       }] })
     }
     if (url.pathname === '/samples.jsonl') return new Response('')
@@ -60,7 +60,7 @@ test('built stats bundle renders the model-speed response', async (t) => {
     await act(async () => { root.render(React.createElement(Panel)) })
     const row = host.querySelector('.tps-speed-table tbody tr')
     assert.match(row?.textContent ?? '', /fixture-model/)
-    assert.equal(row.children[2].textContent, '42.0 tok/sspeedSamples:3')
+    assert.equal(row.children[2].textContent, '42.0 tok/sspeedSamples:1')
     assert.equal(row.children[3].textContent, '31.0 tok/sspeedSamples:3')
   } finally {
     await act(async () => root.unmount())

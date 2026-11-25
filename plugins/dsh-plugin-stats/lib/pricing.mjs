@@ -6080,6 +6080,7 @@ const SPEED_WINDOWS = [
 	12,
 	24
 ];
+const GENERATION_DECODE_FLOOR_MS = 2e3;
 const count = number().int().nonnegative();
 const duration = number().nonnegative().nullable();
 const RequestSpeedSampleSchema = object({
@@ -6104,6 +6105,7 @@ const SpeedRowSchema = object({
 	requests: count,
 	outputTokens: count.nullable(),
 	ttftSamples: count,
+	generationSamples: count,
 	tpsSamples: count,
 	ttftMs: duration,
 	generationTps: duration,
@@ -6113,7 +6115,7 @@ object({
 	asOf: number(),
 	rows: array(SpeedRowSchema)
 });
-/** Same sampling and ratio-of-sums convention as xingleirouter's model table. */
+/** Each rate divides the sum of tokens by the sum of times from its own samples. */
 function summarizeSpeed(samples, hours, asOf) {
 	const from = asOf - hours * 36e5;
 	const buckets = /* @__PURE__ */ new Map();
@@ -6129,6 +6131,7 @@ function summarizeSpeed(samples, hours, asOf) {
 					requests: 0,
 					outputTokens: null,
 					ttftSamples: 0,
+					generationSamples: 0,
 					tpsSamples: 0,
 					ttftMs: null,
 					generationTps: null,
@@ -6136,8 +6139,9 @@ function summarizeSpeed(samples, hours, asOf) {
 				},
 				ttftMs: 0,
 				generationMs: 0,
+				generationOutputTokens: 0,
 				endToEndMs: 0,
-				timedOutputTokens: 0
+				endToEndOutputTokens: 0
 			};
 			buckets.set(key, bucket);
 		}
@@ -6150,18 +6154,22 @@ function summarizeSpeed(samples, hours, asOf) {
 		}
 		if (ttftMs !== null && generationMs !== null && generationMs > 0 && outputTokens !== null) {
 			row.tpsSamples++;
-			bucket.timedOutputTokens += outputTokens;
-			bucket.generationMs += generationMs;
+			bucket.endToEndOutputTokens += outputTokens;
 			bucket.endToEndMs += ttftMs + generationMs;
+			if (generationMs > GENERATION_DECODE_FLOOR_MS) {
+				row.generationSamples++;
+				bucket.generationOutputTokens += outputTokens;
+				bucket.generationMs += generationMs;
+			}
 		}
 	}
 	return {
 		asOf,
-		rows: [...buckets.values()].map(({ row, ttftMs, timedOutputTokens, generationMs, endToEndMs }) => ({
+		rows: [...buckets.values()].map(({ row, ttftMs, generationOutputTokens, generationMs, endToEndOutputTokens, endToEndMs }) => ({
 			...row,
 			ttftMs: row.ttftSamples === 0 ? null : ttftMs / row.ttftSamples,
-			generationTps: row.tpsSamples === 0 ? null : timedOutputTokens * 1e3 / generationMs,
-			endToEndTps: row.tpsSamples === 0 ? null : timedOutputTokens * 1e3 / endToEndMs
+			generationTps: row.generationSamples === 0 ? null : generationOutputTokens * 1e3 / generationMs,
+			endToEndTps: row.tpsSamples === 0 ? null : endToEndOutputTokens * 1e3 / endToEndMs
 		}))
 	};
 }
