@@ -23,7 +23,8 @@ window.__ModuleLoader__.load({
       disabled: '未启用',
       ready: '已就绪',
       not_ready: '未就绪',
-      setup_error: '启动失败，请停用后检查配置',
+      setup_error: '启动失败',
+      credentials: '读取已保存凭据', configuration: '检查连接配置', runtime: '校验 Tunnel 程序', profile: '读取 Web 配置目录', storage: '打开本机状态库', listener: '打开本地 MCP 端口', launch: '启动运行时',
       pending: '待送',
       retrying: '重试中',
       halted: '已停止投递',
@@ -70,7 +71,8 @@ window.__ModuleLoader__.load({
       disabled: 'Disabled',
       ready: 'Ready',
       not_ready: 'Not ready',
-      setup_error: 'Startup failed; disable and review settings',
+      setup_error: 'Startup failed',
+      credentials: 'Read saved credentials', configuration: 'Check connection settings', runtime: 'Verify tunnel binary', profile: 'Locate the Web profile', storage: 'Open local storage', listener: 'Open local MCP listener', launch: 'Start runtime',
       pending: 'Pending',
       retrying: 'Retrying',
       halted: 'Stopped',
@@ -314,6 +316,7 @@ window.__ModuleLoader__.load({
                       status?.tunnel ??
                         (base.enabled ? 'not_ready' : 'disabled'),
                     ),
+                    status?.tunnel === 'setup_error' && status.stage && ` · ${t(status.stage)}`,
                   ),
                   button(
                     base.enabled ? 'disable' : 'enable',
