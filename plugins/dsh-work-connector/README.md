@@ -10,27 +10,18 @@
 dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-work-connector'
 ```
 
-安装后默认不启动隧道，也不发送回报。打开 DSH Web「设置 → Work 连接器」查看隧道与回报状态。准备连接前，需要一个关联目标 ChatGPT 工作区的 Tunnel、一个允许 HTTPS CONNECT 的 HTTP(S) 代理，以及能为 ChatGPT 签发 JWT 访问令牌的 OAuth 授权服务器。插件是资源服务器，不负责用户登录或签发令牌。
+### 在 DSH Web 中配置
 
-在 DSH Web 进程的启动环境中安全设置 `DSH_WORK_TUNNEL_KEY`（有 Tunnel Read + Use 权限的运行密钥，不是管理密钥）。代理需要认证时，使用环境变量保存完整代理地址，不把用户名、密码填进配置。不要向聊天或日志粘贴凭据。
+安装后默认不联网。面板所有者打开「设置 → Work 连接器」即可填写全部连接参数，不必编辑 profile 或设置进程环境变量。
 
-在 web profile 中为 `work-connector` 条目配置以下字段，再设 `enabled: true`。以下是该条目的 **config 内容**，占位值需替换：
+1. **连接设置**：填写 OpenAI Platform 上关联了目标 ChatGPT 工作区的 Tunnel ID 和运行密钥（Tunnel Read + Use，不使用管理密钥）。填写 HTTP(S) 出站代理，然后勾选允许派发的现有 Workspace。Tunnel 控制面、订阅验证和签名回报共用该代理；缺少代理不会启动，连接失败不回退直连。
+2. **授权与事件回报**：填写 OAuth 签发方 `issuer` 和资源地址 `resource`（须与 JWT 的 `iss`、`aud` 分别一致），粘贴该签发方的**公开 JWKS**，每行填写一个允许的用户 `sub` 和一个经核实的回调主机名。插件只验证访问令牌，不负责登录或签发；令牌须有 `exp` 和 `dsh.work` scope。回调只接受精确域名、标准 HTTPS 端口和本机可解析的公网 IPv4；代理须允许向目标 IP 的 443 端口 CONNECT。
+3. **保存配置**只保存草稿，不建立网络连接。确认后单独点**启用连接**，再刷新运行状态。运行时要改参数，先点**停用连接**；这不会中止已受理的 DSH 任务。
+4. 在 ChatGPT 添加自定义 MCP 服务，连接方式选 **Tunnel**，选择目标 Tunnel 并配置 OAuth。见 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) 和 [MCP Events](https://developers.openai.com/plugins/build/mcp-events)。
 
-```yaml
-enabled: true
-tunnelId: <OpenAI Platform 给出的完整 tunnel ID>
-proxy: env:DSH_WORK_PROXY
-workspaceIds: [<已注册的 DSH Workspace ID>]
-callbackHosts: [<Work 实际回调域名>]
-issuer: https://id.example.org
-resource: https://<该 Tunnel 的 MCP 资源主机和路径>
-jwksFile: /etc/dsh/work-issuer-public-jwks.json
-subjects: [<允许派发的用户 sub>]
-```
+运行密钥和代理地址只写入 DSH 凭据存储，不回显。再次保存时留空会保留原值，勾选「清除已存值」才会清除。不要在聊天、日志或截图中提供凭据；只在受信任的 HTTPS 面板或本机回环上配置。已有 profile 的代理、`DSH_WORK_TUNNEL_KEY`、`jwksFile` 可继续使用；在界面替换或清除相应字段后，以新设置为准。
 
-- `resource` 必须与访问令牌的 `aud` 完全一致，`issuer` 与 `iss` 一致。令牌需带 `exp`、被允许的 `sub` 和 `dsh.work` scope。`jwksFile` 提供该 issuer 的**公钥**集，密钥轮换后重载插件。允许用户共享配置中的 Workspace 白名单，但查询、续办和订阅按派发者隔离。只允许信任的操作者使用：Workspace 白名单限制派发位置，不会降低 DSH Agent 本身的工具权限。
-- `callbackHosts` 填经管理员核实的确切回调主机，不填通配符、URL 或代理地址。回调仅支持标准 HTTPS 端口、可从本机解析的公网 IPv4；代理须允许对已解析 IP 的 443 端口 CONNECT，TLS 仍按原域名验证。Tunnel 控制面、订阅验证和后续签名回报共用 `proxy`。缺少代理不启动，出错不回退直连；本机 MCP 转发不走代理。
-- 在 ChatGPT 添加自定义 MCP 服务，连接方式选 **Tunnel**，选择匹配的 Tunnel、配置 OAuth，并安装到目标 Work 工作区。授权服务器、Tunnel 与工作区的管理权限分别配置。见 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) 和 [MCP Events](https://developers.openai.com/plugins/build/mcp-events)。
+允许的用户共享配置中的 Workspace 白名单，但查询、续办和订阅按派发者隔离。只将工作区授权给受信任的操作者：该白名单限制派发位置，不会降低 DSH Agent 本身的工具权限。
 
 ## 在 Work 中使用
 

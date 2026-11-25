@@ -48,5 +48,10 @@
     "client": {
       "platform": "web"
     }
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   }
 }

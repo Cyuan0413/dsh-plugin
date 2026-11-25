@@ -13,22 +13,22 @@ import {Events} from './events.js';
 import {proxyURL,sender} from './network.js';
 import {oauth} from './auth.js';
 import {endpoint} from './mcp.js';
+import {settingsRoute,settingsController,storedSecrets,effectiveSecrets} from './settings.js';
 import {healthRoute,tunnelReady} from './health.js';
 
 export const name='work-connector';
-export const inject=['sessionController','workspaceRegistry','webServer','connection'];
+export const inject=['sessionController','workspaceRegistry','webServer','connection','credentials','configEditor'];
 export const Config=z.object({
   enabled:z.boolean().default(false),tunnelId:z.string(),
   proxy:z.string().description('HTTP(S) 出站代理，或 env:变量名；Tunnel、挑战及签名回报共用。'),
-  issuer:z.string(),resource:z.string(),jwksFile:z.string(),subjects:z.array(z.string()).default([]),
+  credentialId:z.string(),jwksText:z.string(),issuer:z.string(),resource:z.string(),jwksFile:z.string(),subjects:z.array(z.string()).default([]),
   workspaceIds:z.array(z.string()).default([]),callbackHosts:z.array(z.string()).default([]),
 });
-export function environment(config,env=process.env){
-  const raw=config.proxy?.startsWith('env:')?env[config.proxy.slice(4)]:config.proxy;
+export function environment(config,stored={},env=process.env){
+  const {key,proxy:raw}=effectiveSecrets(config,stored,env);
   const proxy=proxyURL(raw);if(!proxy)throw Error('Work connector requires an explicit outbound proxy');
-  const key=env.DSH_WORK_TUNNEL_KEY;
   if(!key||!config.tunnelId||!config.workspaceIds?.length||!config.callbackHosts?.length)throw Error('Missing tunnel credential, ID, workspace allowlist or callback host allowlist');
-  const auth=oauth({issuer:config.issuer,resource:config.resource,jwks:config.jwksFile,subjects:config.subjects});
+  const auth=oauth({issuer:config.issuer,resource:config.resource,jwks:config.jwksFile,jwksText:config.jwksText,subjects:config.subjects});
   return {proxy,key,auth};
 }
 export function runtimeSpec(config,{proxy,key},url,hop,socket){
@@ -38,9 +38,14 @@ export function runtimeSpec(config,{proxy,key},url,hop,socket){
 }
 export async function apply(ctx,config){
   let snapshot=async()=>({tunnel:'disabled',pending:0,retrying:0,halted:0});
+  settingsRoute(ctx,settingsController(ctx,config,environment));
   healthRoute(ctx,()=>snapshot());
   if(!config.enabled)return;
-  const setup=environment(config);const binary=fileURLToPath(new URL('../vendor/tunnel-client-runtime',import.meta.url));
+  try {await start(ctx,config,await storedSecrets(ctx,config),read=>{snapshot=read;});}
+  catch {snapshot=async()=>({tunnel:'setup_error',pending:0,retrying:0,halted:0});ctx.logger.warn('Work connector startup failed; review its settings');}
+}
+async function start(ctx,config,stored,publish){
+  const setup=environment(config,stored);const binary=fileURLToPath(new URL('../vendor/tunnel-client-runtime',import.meta.url));
   if(process.platform!=='linux'||process.arch!=='x64'||createHash('sha256').update(readFileSync(binary)).digest('hex')!=='d82fa113e4bc7ab896ff143120b725e588c2f244935e6d315ccea4ee90c03647')throw Error('Unrecognized tunnel runtime/platform');
   const home=process.env.DSH_PROFILE_DIR;if(!home)throw Error('Web profile directory unavailable');
   const tmp=await mkdtemp(join(tmpdir(),'dsh-work-'));const db=new Store(join(home,'work-connector'));
@@ -62,7 +67,7 @@ export async function apply(ctx,config){
       child.once('close',()=>{child=undefined;if(stopping)return;ctx.logger.warn('Work tunnel stopped; reconnecting');delay=Date.now()-started>60000?1000:Math.min(delay*2,60000);restart=setTimeout(launch,delay);});
     };launch();
     const tick=()=>{if(stopping||pump)return;pump=(async()=>{for(const t of db.all('task')){if(stopping)break;if(!t.terminal&&setup.auth.owners.has(t.owner)&&config.workspaceIds.includes(t.workspaceId)){try{await tasks.refresh(t);}catch{ctx.logger.warn('Work task state temporarily unavailable');}}}if(!stopping)await events.drain();})().catch(()=>ctx.logger.warn('Work connector reconciliation failed')).finally(()=>{pump=undefined;});};
-    snapshot=async()=>{const subs=db.all('sub').filter(s=>s.expiry>Date.now());const pending=subs.filter(s=>(db.get('task',s.taskId)?.revision??0)>s.cursor);return {tunnel:await tunnelReady(join(tmp,'health.sock'))?'ready':'not_ready',pending:pending.length,retrying:pending.filter(s=>s.attempts&&!s.halted).length,halted:pending.filter(s=>s.halted).length};};
+    publish(async()=>{const subs=db.all('sub').filter(s=>s.expiry>Date.now());const pending=subs.filter(s=>(db.get('task',s.taskId)?.revision??0)>s.cursor);return {tunnel:await tunnelReady(join(tmp,'health.sock'))?'ready':'not_ready',pending:pending.length,retrying:pending.filter(s=>s.attempts&&!s.halted).length,halted:pending.filter(s=>s.halted).length};});
     timer=setInterval(tick,2000);tick();ctx.effect(()=>stop,'work connector lifecycle');
   }catch(e){await stop();throw e;}
 }
