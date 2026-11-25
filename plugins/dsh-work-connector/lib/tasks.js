@@ -3,6 +3,16 @@ import { digest } from './network.js';
 
 export const eventName='dsh.task.updated';
 export function text(value,max=16000) { if(typeof value!=='string'||!value.trim()||value.length>max) throw Error('Invalid text argument');return value; }
+export const modelIdMaxLength=256;
+export class InvalidModelSelection extends Error {
+  constructor(){super(`model must be an object with non-blank provider and model IDs (up to ${modelIdMaxLength} characters each)`);}
+}
+function parseModelSelection(value) {
+  if(value===undefined)return undefined;
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>k!=='provider'&&k!=='model'))throw new InvalidModelSelection();
+  const {provider,model}=value;
+  try{return {provider:text(provider,modelIdMaxLength),model:text(model,modelIdMaxLength)};}catch{throw new InvalidModelSelection();}
+}
 export function publicTask(t) {return {taskId:t.id,sessionId:t.sessionId,workspaceId:t.workspaceId,status:t.status,summary:t.summary||'',...(t.pending?.length?{pendingInput:t.pending}:{})};}
 export function change(db,t,status,summary,time=Date.now(),terminal=false) {
   Object.assign(t,{status,summary,terminal});
@@ -36,18 +46,21 @@ export function fold(db,t,e) {
   }
 }
 export class Tasks {
-  constructor(ctx,db,allowed){this.api=ctx.sessionController;this.registry=ctx.workspaceRegistry;this.db=db;this.allowed=allowed;this.locks=new Map();}
+  constructor(ctx,db,allowed){this.api=ctx.sessionController;this.registry=ctx.workspaceRegistry;this.llm=ctx.llm;this.sessions=ctx.sessions;this.db=db;this.allowed=allowed;this.locks=new Map();}
   own(owner,id){const t=this.db.get('task',text(id,128));if(!t||t.owner!==owner||!this.allowed.includes(t.workspaceId))throw Error('Task unavailable');return t;}
   async submit(owner,a,parent){
     const workspaceId=parent?.workspaceId??text(a.workspaceId,256);
     if(!this.allowed.includes(workspaceId)||!this.registry.get(workspaceId))throw Error('Workspace not permitted');
     const instruction=parent?text(a.instruction):[text(a.goal),`上下文：${a.context===undefined?'无':text(a.context)}`,`验收标准：${text(a.acceptance)}`].join('\n\n');
-    const id=digest(JSON.stringify([owner,text(a.idempotencyKey,128)]));const fingerprint=digest(JSON.stringify([workspaceId,parent?.id,instruction]));
+    const model=parent?undefined:parseModelSelection(a.model);
+    const id=digest(JSON.stringify([owner,text(a.idempotencyKey,128)]));
+    // Keep the legacy fingerprint when no model was requested.
+    const fingerprint=digest(JSON.stringify([workspaceId,parent?.id,instruction,...(model?[model]:[])]));
     let t=this.db.get('task',id);
     if(t&&t.fingerprint!==fingerprint)throw Error('Idempotency key already used for different input');
     if(this.locks.has(id))return this.locks.get(id);
     if(t && !['creating','submitting'].includes(t.status))return publicTask(t);
-    const promise=this.admit(t??{id,fingerprint,owner,workspaceId,sessionId:parent?.sessionId??randomUUID(),requestId:randomUUID(),revision:0,status:parent?'submitting':'creating',cursor:-1},instruction);
+    const promise=this.admit(t??{id,fingerprint,owner,workspaceId,sessionId:parent?.sessionId??randomUUID(),requestId:randomUUID(),revision:0,status:parent?'submitting':'creating',cursor:-1,...(model?{model}:{})},instruction);
     this.locks.set(id,promise);try{return await promise;}finally{this.locks.delete(id);}
   }
   async admit(t,instruction){
@@ -57,8 +70,32 @@ export class Tasks {
       catch(e){if(e.details?.sessionId)t.sessionId=e.details.sessionId;db.transaction(()=>change(db,t,'failed','创建或挂接失败，请核对面板。',Date.now(),true));return publicTask(t);}
       t.status='submitting';db.put('task',t);
     }
-    // Persist the actual session and request id before prompt. Ambiguous network
-    // failures retry ONLY prompt with the same rpcId, never session.create.
+    if(t.model&&!t.modelApplied){
+      const {provider,model}=t.model;
+      let failure;
+      try{
+        const models=await this.llm.listModels(provider);
+        if(!models.some(entry=>entry.id===model))throw Error('Model not advertised');
+        await this.llm.resolveCallConfig(t.model);
+      }catch{failure=`指定模型（provider: ${JSON.stringify(provider)}，model: ${JSON.stringify(model)}）不可用。请核对 DSH 的模型列表与提供方配置；未提交指令。`;}
+      if(!failure){
+        try{
+          // The Host Agent records a session-local choice. sessionController.selectModel
+          // would also save the profile default in DSH 0.2.2-rc.5.
+          const {agent,error}=await this.api.resolveAgent(t.sessionId);
+          if(error||!agent)throw Error('Session Agent unavailable');
+          agent.model.select(t.model);
+          // The DSH event must survive restart before SQLite records selection as applied.
+          if(!await this.sessions.flush(agent.session))throw Error('Session persistence unavailable');
+        }catch{failure='无法为目标会话设置指定模型，请在 DSH 面板核对会话；未提交指令。';}
+      }
+      if(failure){
+        delete t.instruction;db.transaction(()=>change(db,t,'failed',failure,Date.now(),true));return publicTask(t);
+      }
+      t.modelApplied=true;db.put('task',t);
+    }
+    // Persist the actual session, model application and request ID before prompt.
+    // Ambiguous admission retries ONLY prompt with the same rpcId.
     await this.api.prompt({sessionId:t.sessionId,requestId:t.requestId,mode:'queue',content:[{type:'text',text:instruction+'\n\n请简述本次委托的结果；只有确已满足验收条件时，末行写 DSH_WORK_STATUS=completed；需要补充信息写 DSH_WORK_STATUS=needs_input，明确失败写 DSH_WORK_STATUS=failed。'}]},AbortSignal.timeout(30000));
     delete t.instruction;t.status='queued';db.put('task',t);return publicTask(t);
   }
