@@ -55,7 +55,6 @@ test('配置可在未启用时保存，密钥与认证代理不出现在回读/�
     ...page.values,
     tunnelId: 'tunnel_test',
     workspaceIds: ['w'],
-    callbackHosts: ['cb.example'],
   };
   await assert.rejects(
     h.api.write({ action: 'enable', version: page.version }),
@@ -108,14 +107,11 @@ test('配置可在未启用时保存，密钥与认证代理不出现在回读/�
   page = await h.api.view();
   assert.ok(!page.hasKey && !page.hasProxy);
 });
-test('无效代理、回调域名和未注册工作区不会写入配置或凭据', async () => {
+test('无效代理和未注册工作区不会写入配置或凭据', async () => {
   const h = harness(),
     { version, values } = await h.api.view();
   for (const change of [
     { proxy: 'file:///tmp/p' },
-    {
-      values: { ...values, callbackHosts: ['*.example.org'] },
-    },
     { values: { ...values, workspaceIds: ['missing'] } },
   ])
     await assert.rejects(

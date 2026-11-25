@@ -21,12 +21,12 @@ export const Config=z.object({
   enabled:z.boolean().default(false),tunnelId:z.string(),
   proxy:z.string().description('HTTP(S) 出站代理，或 env:变量名；Tunnel、挑战及签名回报共用。'),
   credentialId:z.string(),
-  workspaceIds:z.array(z.string()).default([]),callbackHosts:z.array(z.string()).default([]),
+  workspaceIds:z.array(z.string()).default([]),
 });
 export function environment(config,stored={},env=process.env){
   const {key,proxy:raw}=effectiveSecrets(config,stored,env);
   const proxy=proxyURL(raw);if(!proxy)throw Error('Work connector requires an explicit outbound proxy');
-  if(!key||!config.tunnelId||!config.workspaceIds?.length||!config.callbackHosts?.length)throw Error('Missing tunnel credential, ID, workspace allowlist or callback host allowlist');
+  if(!key||!config.tunnelId||!config.workspaceIds?.length)throw Error('Missing tunnel credential, ID, or workspace allowlist');
   return {proxy,key};
 }
 export function runtimeSpec(config,{proxy,key},url,hop,socket){
@@ -49,7 +49,7 @@ async function start(ctx,config,stored,publish){
   const tmp=await mkdtemp(join(tmpdir(),'dsh-work-'));const db=new Store(join(home,'work-connector'));
   // Scope persisted tasks to this private tunnel, never to caller-supplied identity.
   const owner='tunnel:'+config.tunnelId;
-  const tasks=new Tasks(ctx,db,config.workspaceIds);const events=new Events(db,tasks,sender({proxy:setup.proxy,hosts:config.callbackHosts}),config.callbackHosts,owner);
+  const tasks=new Tasks(ctx,db,config.workspaceIds);const events=new Events(db,tasks,sender({proxy:setup.proxy}),owner);
   const hop=randomBytes(32).toString('hex');const server=endpoint({hop,owner,tasks,events,allowed:config.workspaceIds});
   let stopping=false,child,restart,timer,pump,delay=1000;
   const stop=async()=>{

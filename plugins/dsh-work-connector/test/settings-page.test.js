@@ -28,7 +28,6 @@ test('Web 设置页离线渲染、编辑工作区、保存、启停及失败提�
     enabled: false,
     values: {
       tunnelId: '',
-      callbackHosts: [],
       workspaceIds: [],
     },
     workspaces: [{ id: 'work', title: '我的工作区', path: '/project' }],
@@ -77,7 +76,7 @@ test('Web 设置页离线渲染、编辑工作区、保存、启停及失败提�
   await act(() => root.render(React.createElement(Page)));
   const section = document.querySelector('section');
   assert.ok(section.textContent.includes('未启用'));
-  assert.match(section.textContent, /允许的回调域名/);
+  assert.doesNotMatch(section.textContent, /允许的回调域名/);
   assert.doesNotMatch(section.textContent, /OAuth|JWKS|签发方/);
   assert.equal(section.querySelectorAll('input[type=password]').length, 2);
   assert.equal(section.querySelectorAll('input[type=password]')[0].value, '');

@@ -18,10 +18,6 @@ window.__ModuleLoader__.load({
       clear: '清除已存值',
       workspaces: '允许派发的工作区',
       noWorkspace: '还没有工作区，请先在 DSH 侧边栏添加。',
-      advanced: '事件回报',
-      callbackHosts: '允许的回调域名',
-      onePerLine: '每行一项',
-      hostsHint: '填写实际回调主机名，不带协议、路径或通配符。',
       status: '运行状态',
       tunnel: '隧道',
       disabled: '未启用',
@@ -45,9 +41,8 @@ window.__ModuleLoader__.load({
       busy: '正在处理…',
       access: '仅已登录的面板所有者可操作。',
       stale: '配置已经变化，请重新载入后再保存。',
-      incomplete: '无法启用：请核对Tunnel ID、运行密钥、出站代理、工作区和回调域名。',
+      incomplete: '无法启用：请核对 Tunnel ID、运行密钥、出站代理和工作区。',
       workspace: '请选择仍然存在的 DSH 工作区。',
-      hosts: '回调域名格式不正确。',
       invalid: '字段格式无效或过长。',
       proxyError: '请输入有效的 HTTP(S) 代理地址。',
       saveFailed: '操作未确认，请重新载入配置核对。',
@@ -70,10 +65,6 @@ window.__ModuleLoader__.load({
       clear: 'Clear saved value',
       workspaces: 'Allowed workspaces',
       noWorkspace: 'Add a workspace in the sidebar first.',
-      advanced: 'Event delivery',
-      callbackHosts: 'Allowed callback hosts',
-      onePerLine: 'One entry per line',
-      hostsHint: 'Hostnames only; no scheme, path or wildcard.',
       status: 'Runtime status',
       tunnel: 'Tunnel',
       disabled: 'Disabled',
@@ -98,21 +89,15 @@ window.__ModuleLoader__.load({
       access: 'An authenticated owner session is required.',
       stale: 'Settings changed. Reload before saving.',
       incomplete:
-        'Check tunnel ID, runtime key, proxy, workspaces and callback hosts before enabling.',
+        'Check tunnel ID, runtime key, proxy and workspaces before enabling.',
       workspace: 'Select an existing workspace.',
-      hosts: 'Enter exact callback hostnames.',
       invalid: 'Invalid or oversized field.',
       proxyError: 'Enter a valid HTTP(S) proxy.',
       saveFailed: 'Operation not confirmed. Reload to verify.',
       failure: 'Request failed. Check the connection or refresh the page.',
       discard: 'Discard unsaved changes and reload?',
     };
-    const css = `.wc-settings{color:var(--dsw-alias-label-primary);max-width:48rem;display:grid;gap:1.15rem;padding-bottom:1rem}.wc-settings h3,.wc-settings h4,.wc-settings p{margin:0}.wc-settings h3{font-size:1.12rem}.wc-settings h4{font-size:.95rem}.wc-settings .muted,.wc-settings small{color:var(--dsw-alias-label-secondary);font-size:.85em}.wc-settings fieldset{margin:0;padding:0;border:0;min-width:0;display:grid;gap:.85rem}.wc-settings .field{display:grid;gap:.35rem;font-size:.92em}.wc-settings .box{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:.45rem .6rem}.wc-settings textarea{resize:vertical}.wc-settings .box:focus-visible,.wc-settings button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary)}.wc-settings .row{display:flex;gap:.65rem;align-items:center;flex-wrap:wrap}.wc-settings .block{border-top:1px solid var(--dsw-alias-border-l1);padding-top:.85rem;display:grid;gap:.65rem}.wc-settings button{font:inherit;cursor:pointer;border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit;border:1px solid var(--dsw-alias-border-l2);padding:.38rem .8rem}.wc-settings button:disabled{opacity:.5;cursor:default}.wc-settings .primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}.wc-settings .error{color:var(--dsw-alias-state-error-primary)}.wc-settings input[type=checkbox]{accent-color:var(--dsw-alias-brand-primary)}.wc-settings label{overflow-wrap:anywhere}.wc-settings .badge{background:var(--dsw-alias-bg-layer-2);border-radius:12px;padding:.15rem .55rem}`;
-    const lines = (s) =>
-      s
-        .split('\n')
-        .map((v) => v.trim())
-        .filter(Boolean);
+    const css = `.wc-settings{color:var(--dsw-alias-label-primary);max-width:48rem;display:grid;gap:1.15rem;padding-bottom:1rem}.wc-settings h3,.wc-settings h4,.wc-settings p{margin:0}.wc-settings h3{font-size:1.12rem}.wc-settings h4{font-size:.95rem}.wc-settings .muted,.wc-settings small{color:var(--dsw-alias-label-secondary);font-size:.85em}.wc-settings fieldset{margin:0;padding:0;border:0;min-width:0;display:grid;gap:.85rem}.wc-settings .field{display:grid;gap:.35rem;font-size:.92em}.wc-settings .box{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:.45rem .6rem}.wc-settings .box:focus-visible,.wc-settings button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary)}.wc-settings .row{display:flex;gap:.65rem;align-items:center;flex-wrap:wrap}.wc-settings .block{border-top:1px solid var(--dsw-alias-border-l1);padding-top:.85rem;display:grid;gap:.65rem}.wc-settings button{font:inherit;cursor:pointer;border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit;border:1px solid var(--dsw-alias-border-l2);padding:.38rem .8rem}.wc-settings button:disabled{opacity:.5;cursor:default}.wc-settings .primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}.wc-settings .error{color:var(--dsw-alias-state-error-primary)}.wc-settings input[type=checkbox]{accent-color:var(--dsw-alias-brand-primary)}.wc-settings label{overflow-wrap:anywhere}.wc-settings .badge{background:var(--dsw-alias-bg-layer-2);border-radius:12px;padding:.15rem .55rem}`;
     async function api(path, body, signal) {
       const r = await fetch('/work-connector/' + path, {
         cache: 'no-store',
@@ -168,10 +153,7 @@ window.__ModuleLoader__.load({
             const b = await api('settings', null, sig.current);
             if (!mounted.current) return;
             B(b);
-            F({
-              ...b.values,
-              callbackHosts: b.values.callbackHosts.join('\n'),
-            });
+            F(b.values);
             S({});
           }
           async function health() {
@@ -188,13 +170,9 @@ window.__ModuleLoader__.load({
               c.abort();
             };
           }, []);
-          const v = {
-            ...form,
-            callbackHosts: lines(form.callbackHosts ?? ''),
-          };
           const dirty =
             !!base &&
-            (JSON.stringify(v) !== JSON.stringify(base.values) ||
+            (JSON.stringify(form) !== JSON.stringify(base.values) ||
               Object.keys(secret).length > 0);
           function change(k, val) {
             F((f) => ({ ...f, [k]: val }));
@@ -228,7 +206,7 @@ window.__ModuleLoader__.load({
                   {
                     version: base.version,
                     action,
-                    ...(action === 'save' ? { values: v, ...secret } : {}),
+                    ...(action === 'save' ? { values: form, ...secret } : {}),
                   },
                   sig.current,
                 );
@@ -259,7 +237,7 @@ window.__ModuleLoader__.load({
               },
               t(label),
             );
-          function field(key, hint, placeholder = '', area = false) {
+          function field(key, hint, placeholder = '') {
             const props = {
               className: 'box',
               value: form[key] ?? '',
@@ -271,9 +249,7 @@ window.__ModuleLoader__.load({
               'label',
               { className: 'field' },
               h('strong', null, t(key)),
-              area
-                ? h('textarea', { ...props, rows: 2 })
-                : h('input', props),
+              h('input', props),
               hint && h('small', null, t(hint)),
             );
           }
@@ -391,12 +367,6 @@ window.__ModuleLoader__.load({
                         h('small', null, w.path),
                       ),
                     ),
-                  ),
-                  h(
-                    'div',
-                    { className: 'block' },
-                    h('h4', null, t('advanced')),
-                    field('callbackHosts', 'hostsHint', t('onePerLine'), true),
                   ),
                 ),
                 h(

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { proxyURL } from './network.js';
 
 const prefix = 'work-connector/settings-'; // Each DSH credential-key segment must start with a letter.
-const fields = ['tunnelId', 'callbackHosts', 'workspaceIds'];
+const fields = ['tunnelId', 'workspaceIds'];
 const invalid = (code) =>
   Object.assign(new Error(code), { publicCode: code, status: 400 });
 function scalar(v, max = 2048) {
@@ -43,13 +43,7 @@ export function settingsController(ctx, config, preflight) {
   async function view() {
     const stored = await storedSecrets(ctx, config),
       sec = effectiveSecrets(config, stored);
-    const values = Object.fromEntries(
-      fields.map((k) => [
-        k,
-        config[k] ??
-          (['workspaceIds', 'callbackHosts'].includes(k) ? [] : ''),
-      ]),
-    );
+    const values = { tunnelId: config.tunnelId ?? '', workspaceIds: config.workspaceIds ?? [] };
     return {
       version,
       enabled: !!config.enabled,
@@ -95,20 +89,9 @@ export function settingsController(ctx, config, preflight) {
       const patch = {
         tunnelId: scalar(v.tunnelId),
         workspaceIds: list(v.workspaceIds),
-        callbackHosts: list(v.callbackHosts).map((s) => s.toLowerCase()),
       };
       if (patch.workspaceIds.some((id) => !ctx.workspaceRegistry.get(id)))
         throw invalid('workspace');
-      if (
-        patch.callbackHosts.some(
-          (h) =>
-            !h.includes('.') ||
-            h
-              .split('.')
-              .some((l) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(l)),
-        )
-      )
-        throw invalid('hosts');
       const secrets = { ...(await storedSecrets(ctx, config)) };
       let rotate = false;
       for (const k of ['key', 'proxy'])
@@ -142,7 +125,7 @@ export function settingsController(ctx, config, preflight) {
         await ctx.configEditor.edit(entry, (c) => {
           // Drop retired configuration on save, without touching other profile settings.
           const next = { ...c, ...patch, enabled: false };
-          for (const key of ['issuer', 'resource', 'subjects', 'jwksText', 'jwksFile']) delete next[key];
+          for (const key of ['issuer', 'resource', 'subjects', 'jwksText', 'jwksFile', 'callbackHosts']) delete next[key];
           return next;
         });
       } catch (err) {

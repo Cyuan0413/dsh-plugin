@@ -13,9 +13,13 @@ export function proxyURL(raw) {
   if (!['http:','https:'].includes(u.protocol) || u.pathname!=='/' || u.search || u.hash) throw Error('Invalid HTTP(S) proxy');
   return u.href;
 }
-export function callbackURL(raw, hosts) {
+export function callbackURL(raw) {
   const u = new URL(raw);
-  if (u.protocol!=='https:' || u.port || u.username || u.password || u.hash || isIP(u.hostname) || !hosts.includes(u.hostname)) throw Error('Callback destination is not approved');
+  const labels = u.hostname.split('.');
+  if (u.protocol!=='https:' || u.port || u.username || u.password || u.hash || isIP(u.hostname) ||
+      u.hostname.length>253 || labels.length<2 || !labels.every(label=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) {
+    throw Error('Expected a callback HTTPS URL with a DNS hostname');
+  }
   return u;
 }
 export function signingKey(secret) {
@@ -32,11 +36,11 @@ export function signedHeaders(sub, id, body, now=Date.now()) {
 }
 // Connect to the vetted IPv4 address even inside CONNECT. Preserve the public
 // hostname separately for TLS certificate verification, SNI and the Host header.
-export function sender({proxy,hosts}, {resolve=lookup,request=https.request}={}) {
+export function sender({proxy}, {resolve=lookup,request=https.request}={}) {
   if (!proxy) throw Error('A proxy is required for signed callbacks');
   const agent = new HttpsProxyAgent(proxy,{keepAlive:false,timeout:10000});
   return async (sub, id, data) => {
-    const u = callbackURL(sub.url, hosts);
+    const u = callbackURL(sub.url);
     const addresses = await resolve(u.hostname,{all:true,family:4});
     if (!addresses.length || addresses.some(a=>!ipaddr.IPv4.isValid(a.address) || ipaddr.parse(a.address).range()!=='unicast')) throw Error('Callback address rejected');
     const body = JSON.stringify(data);

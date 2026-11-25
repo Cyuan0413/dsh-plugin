@@ -3,12 +3,12 @@ import { eventName } from './tasks.js';
 
 const DAY=86400000;
 export class Events {
-  constructor(db,tasks,send,hosts,owner){Object.assign(this,{db,tasks,send,hosts,owner});}
+  constructor(db,tasks,send,owner){Object.assign(this,{db,tasks,send,owner});}
   async subscription(owner,p,remove=false){
     const idTask=p.arguments?.taskId;
     if(p.name!==eventName||!idTask||Object.keys(p.arguments).length!==1||p.delivery?.mode!=='webhook')throw Error('Invalid subscription');
     this.tasks.own(owner,idTask);
-    const url=callbackURL(p.delivery.url,this.hosts).href;
+    const url=callbackURL(p.delivery.url).href;
     const id=digest(JSON.stringify([owner,idTask,url,eventName]));
     if(remove){this.db.remove('sub',id);return {};}
     signingKey(p.delivery.secret);const ttl=p.ttlMs??DAY;if(!Number.isSafeInteger(ttl)||ttl<=0)throw Error('Invalid subscription lifetime');

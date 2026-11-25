@@ -21,19 +21,28 @@ const listen=async s=>{s.listen(0,'127.0.0.1');await once(s,'listening');return 
 test('签名验证和事件经同一真实 CONNECT 代理，绑定目标 IP、SNI 和原始字节；拒绝后不直连',async t=>{
   const dir=mkdtempSync(join(tmpdir(),'work-tls-'));const cert=join(dir,'cert'),key=join(dir,'key');
   execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=callback.example','-addext','subjectAltName=DNS:callback.example','-keyout',key,'-out',cert],{stdio:'ignore'});
-  const seen=[],connections=[];const secret=randomBytes(32);const sub={id:'test',url:'https://callback.example/return',secret:'whsec_'+secret.toString('base64')};
+  let redirect=false;const seen=[],connections=[];const secret=randomBytes(32);const sub={id:'test',url:'https://callback.example/return',secret:'whsec_'+secret.toString('base64')};
   const tls=https.createServer({key:readFileSync(key),cert:readFileSync(cert)},async(q,r)=>{
     let body='';for await(const b of q)body+=b;const h=q.headers;
     seen.push({host:h.host,sni:q.socket.servername,valid:h['webhook-signature']==='v1,'+createHmac('sha256',secret).update(`${h['webhook-id']}.${h['webhook-timestamp']}.${body}`).digest('base64')});
     if(h['proxy-authorization']!==undefined){r.writeHead(400);r.end();return;}
+    if(redirect){r.writeHead(307,{location:'/other'});r.end();return;}
     const data=JSON.parse(body);r.end(JSON.stringify({challenge:data.challenge}));
   });const dest=await listen(tls);t.after(()=>tls.close());
   const proxy=http.createServer();let refuse=false;proxy.on('connect',(req,socket)=>{connections.push(req.url);if(req.headers['proxy-authorization']!==expectedAuth)return socket.end('HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n');if(refuse)return socket.end('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n');const upstream=net.connect(dest,'127.0.0.1',()=>{socket.write('HTTP/1.1 200 OK\r\n\r\n');socket.pipe(upstream).pipe(socket);});socket.on('error',()=>upstream.destroy());upstream.on('error',()=>socket.destroy());});
   const port=await listen(proxy);t.after(()=>proxy.close());
-  const cfg={hosts:['callback.example'],proxy:authedProxy(port)};const io={resolve:async()=>[{address:'93.184.216.34'}],request:(o,cb)=>https.request({...o,ca:readFileSync(cert)},cb)};
+  const cfg={proxy:authedProxy(port)};const io={resolve:async()=>[{address:'93.184.216.34'}],request:(o,cb)=>https.request({...o,ca:readFileSync(cert)},cb)};
   const send=sender(cfg,io);await verify(send,sub);assert.equal((await send(sub,'evt',{eventId:'evt'})).status,200);assert.equal((await sender({...cfg,proxy:`http://fixture-user:wrong@127.0.0.1:${port}`},io)(sub,'bad',{})).status,407);refuse=true;assert.equal((await send(sub,'evt',{eventId:'evt'})).status,502);
   assert.deepEqual(connections,Array(4).fill('93.184.216.34:443'));assert.deepEqual(seen,Array(2).fill({host:'callback.example',sni:'callback.example',valid:true}));
-  await assert.rejects(sender(cfg,{...io,resolve:async()=>[{address:'127.0.0.1'}]})(sub,'evt',{}));assert.throws(()=>sender({hosts:cfg.hosts}));
+  refuse=false;redirect=true;
+  await assert.rejects(verify(send,sub),/challenge failed/i);
+  assert.equal(seen.length,3); // No second POST to Location.
+  const mixed=sender(cfg,{...io,resolve:async()=>[{address:'93.184.216.34'},{address:'10.0.0.1'}]});
+  await assert.rejects(mixed(sub,'evt',{}),/address rejected/i);
+  for(const url of ['http://callback.example', 'https://callback.example:444', 'https://u:p@callback.example','https://127.0.0.1', 'https://[::1]']) {
+    await assert.rejects(send({...sub,url},'evt',{}), /callback HTTPS URL/);
+  }
+  assert.equal(connections.length,5);assert.throws(()=>sender({}));
 });
 test('内置 Go 运行时向配置的代理建立控制面 CONNECT', {timeout:12000},async t=>{
   const proxy=http.createServer();const contacted=once(proxy,'connect',{signal:AbortSignal.timeout(8000)});proxy.on('connect',(_q,s)=>{s.on('error',()=>{});s.end('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n');});const port=await listen(proxy);t.after(()=>proxy.close());
