@@ -12,6 +12,7 @@ DeepSeek Harness（DSH）插件，每个插件是 `plugins/<包名>/` 下独立�
 | [dsh-memorix-tools](plugins/dsh-memorix-tools/) | 实现包：以无状态方式接入 Memorix 的 MCP 工具，每次调用按当前会话的工作目录选择项目；由 dsh-mcp-memorix 组合。 |
 | [dsh-pairing-entry](plugins/dsh-pairing-entry/) | 给 DSH Web 一个固定入口 `/entry/<key>`：访问它自动换取当前启动 token，收藏的地址不再随重启失效。key 在 Web 设置面板里配置。 |
 | [dsh-sleep-guard](plugins/dsh-sleep-guard/) | 拦截以 `sleep N` 开头的 Bash 命令，改为提示 Agent 用后台 Job 与 `job_output(wait=true)` 等结果。 |
+| [dsh-work-connector](plugins/dsh-work-connector/) | 通过内置 Secure MCP Tunnel 从 ChatGPT Work 派发 DSH 任务；隧道与签名回报使用同一代理。 |
 
 ## 使用前提
 

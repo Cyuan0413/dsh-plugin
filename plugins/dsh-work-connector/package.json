@@ -1,0 +1,56 @@
+{
+  "name": "dsh-work-connector",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Private ChatGPT Work connector for DSH",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json",
+    "./client": "./lib/client.js"
+  },
+  "files": [
+    "lib",
+    "vendor",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "0.2.2-rc.5"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "dependencies": {
+    "https-proxy-agent": "7.0.6",
+    "ipaddr.js": "2.2.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}

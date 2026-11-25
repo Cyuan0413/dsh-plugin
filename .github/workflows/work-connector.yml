@@ -1,0 +1,24 @@
+name: Work connector
+on:
+  pull_request:
+    paths:
+      - 'plugins/dsh-work-connector/**'
+      - '.github/workflows/work-connector.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/dsh-work-connector
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify bundled runtime
+        run: echo 'd82fa113e4bc7ab896ff143120b725e588c2f244935e6d315ccea4ee90c03647  vendor/tunnel-client-runtime' | sha256sum --check
+      - run: npm test
+      - run: npm pack --dry-run
