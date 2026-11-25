@@ -27,7 +27,21 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 
 ## 在 Work 中使用
 
-例如：「列出我可以使用的工作区。在指定工作区做一项只读检查，返回会话 ID；订阅这次任务，完成或需要我介入时在这条对话告诉我。」`dispatch` 返回任务 ID 和会话 ID；工具接受只表示指令已入队。`status` 查询任务，`continue_task` 在原会话排队。写入重试须使用相同的 `idempotencyKey` 和参数。每个新任务要按返回的 `taskId` 订阅 `dsh.task.updated`。
+例如：「列出我可以使用的工作区。在指定工作区做一项只读检查，返回会话 ID；订阅这次任务，完成或需要我介入时在这条对话告诉我。」`dispatch` 返回任务 ID 和会话 ID；`queued` 只表示指令已入队。`status` 查询任务，`continue_task` 在原会话排队。写入重试须使用相同的 `idempotencyKey` 和参数。每个新任务要按返回的 `taskId` 订阅 `dsh.task.updated`。
+
+新任务可以在 `dispatch` 中传入可选的 `model` 对象，例如：
+
+```json
+{
+  "workspaceId": "my-workspace",
+  "goal": "只读检查工作区的项目结构",
+  "acceptance": "简述目录用途，不修改文件",
+  "idempotencyKey": "inspect-project-001",
+  "model": { "provider": "deepseek-account", "model": "deepseek-v4-pro" }
+}
+```
+
+请将 `provider` 和内层 `model` 换成当前 DSH 模型列表中的提供方 ID 和模型 ID。所选模型从第一条指令起在该会话生效，不改变 profile 默认模型；省略 `model` 则沿用默认模型。`continue_task` 继续使用原会话的当前模型，不接受 `model` 参数。指定模型未通过可用性检查时，`dispatch` 返回 `failed`，可能留下一个空会话，但不会提交指令或改用默认模型。修正模型后请用新的 `idempotencyKey` 派发。
 
 `completed` 表示 Agent 明确报告完成，不代替用户验收；只有轮次结束时返回 `turn_returned`。审批和追问在 DSH 面板处理。人工指令与派发指令进入同一轮时，可能显示 `review_required`，避免把后续聊天结果归给原任务。
 

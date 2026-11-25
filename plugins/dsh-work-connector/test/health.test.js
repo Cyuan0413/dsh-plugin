@@ -13,6 +13,9 @@ test('Host 启用时用当前 profile 创建状态库，不依赖 Shell 环境',
     credentials: { readRecord: async () => ({kind:'grant', payload:{key:'fixture',proxy:'http://127.0.0.1:9'}}) },
     webServer: { register: r => {routes.set(r.path,r);} },
     logger: {warn() {}},
+    sessionController: {resolveAgent() {}},
+    llm: {listModels() {},resolveCallConfig() {}},
+    sessions: {flush() {}},
     effect(fn, name) {const release=fn(); if(name==='work connector lifecycle') t.after(release);},
   };
   await apply(ctx, {enabled:true, credentialId:'00000000-0000-0000-0000-000000000000', tunnelId:'tunnel_0123456789abcdef0123456789abcdef',workspaceIds:['fixture']});
