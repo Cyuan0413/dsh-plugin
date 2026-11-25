@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-stats",
-  "version": "0.1.1-model-speed.1",
+  "version": "0.1.1-model-speed.2",
   "description": "Usage, model speed, cost, and tool statistics for DeepSeek Harness Web",
   "license": "MIT",
   "author": "Huakun Shen",

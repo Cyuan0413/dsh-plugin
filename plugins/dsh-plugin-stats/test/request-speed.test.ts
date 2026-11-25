@@ -9,17 +9,30 @@ const request = (changes: Partial<RequestSpeedSample> = {}): RequestSpeedSample 
 })
 
 describe('request-level model speed', () => {
-  it('groups provider/model and uses complete matched samples for the ratio of sums', () => {
+  it('groups provider/model and calculates each rate using matching tokens and times', () => {
     const { rows } = summarizeSpeed([
       request(), request({ ttftMs: 3000, generationMs: 3000, outputTokens: 90 }),
-      request({ ttftMs: 2000, outputTokens: null }), request({ ttftMs: null, outputTokens: 500 }),
+      request({ ttftMs: 2000, generationMs: 4000, outputTokens: null }),
+      request({ ttftMs: null, generationMs: 4000, outputTokens: 500 }),
       request({ provider: 'b', ttftMs: null, generationMs: null, outputTokens: null }),
     ], 1, now)
     expect(rows).toEqual([
-      { provider: 'a', model: 'model', requests: 4, outputTokens: 690, ttftSamples: 3, tpsSamples: 2,
-        ttftMs: 2000, generationTps: 47.5, endToEndTps: 23.75 },
-      { provider: 'b', model: 'model', requests: 1, outputTokens: null, ttftSamples: 0, tpsSamples: 0,
+      { provider: 'a', model: 'model', requests: 4, outputTokens: 690, ttftSamples: 3, generationSamples: 1, tpsSamples: 2,
+        ttftMs: 2000, generationTps: 30, endToEndTps: 23.75 },
+      { provider: 'b', model: 'model', requests: 1, outputTokens: null, ttftSamples: 0, generationSamples: 0, tpsSamples: 0,
         ttftMs: null, generationTps: null, endToEndTps: null },
+    ])
+  })
+
+  it('excludes decode times up to and including two seconds only from generation rate', () => {
+    const { rows } = summarizeSpeed([
+      request({ generationMs: 1999 }), request({ generationMs: 2000 }), request({ generationMs: 2001 }),
+      request({ provider: 'b', generationMs: 2000 }),
+    ], 1, now)
+    expect(rows).toMatchObject([
+      { generationSamples: 1, generationTps: 100_000 / 2001, tpsSamples: 3, endToEndTps: 300_000 / 9000,
+        requests: 3, outputTokens: 300, ttftSamples: 3, ttftMs: 1000 },
+      { generationSamples: 0, generationTps: null, tpsSamples: 1, endToEndTps: 100_000 / 3000 },
     ])
   })
 

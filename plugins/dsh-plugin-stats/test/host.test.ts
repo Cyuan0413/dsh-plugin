@@ -197,7 +197,8 @@ describe('host behavior', () => {
     const response = await f.call(`${ROUTE_SPEED}?hours=1`)
     expect(response.code).toBe(200)
     expect(JSON.parse(response.body).rows).toMatchObject([
-      { model: 'observed', provider: 'provider-a', requests: 1, outputTokens: 50, ttftSamples: 1, tpsSamples: 1 },
+      { model: 'observed', provider: 'provider-a', requests: 1, outputTokens: 50, ttftSamples: 1,
+        generationSamples: 0, generationTps: null, tpsSamples: 1 },
     ])
     expect((await f.call(ROUTE_SAMPLES)).body).toBe('')
   })
