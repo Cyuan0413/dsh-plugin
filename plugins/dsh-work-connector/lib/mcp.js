@@ -1,18 +1,21 @@
 import http from 'node:http';
 import {equal} from './network.js';
-import {eventName,InvalidModelSelection,modelIdMaxLength,publicTask} from './tasks.js';
+import {eventName,InvalidModelSelection,modelIdMaxLength,publicTask,WorkspaceSelectionError} from './tasks.js';
 const str={type:'string',minLength:1};
 const object=(properties,required)=>({type:'object',properties,required,additionalProperties:false});
 const modelId={...str,maxLength:modelIdMaxLength,pattern:'\\S'};
 const modelSelection={...object({provider:{...modelId,description:'Exact DSH provider ID.'},model:{...modelId,description:'Exact model ID within that provider.'}},['provider','model']),description:'Optional model for the new session, including its first instruction. Omit to use the profile default.'};
 const tools=[
-  {name:'dispatch',description:'Create a DSH task in an allowed workspace; reuse idempotencyKey on retry. Subscribe to dsh.task.updated using the returned taskId.',inputSchema:object({workspaceId:str,goal:str,context:str,acceptance:str,idempotencyKey:str,model:modelSelection},['workspaceId','goal','acceptance','idempotencyKey'])},
+  {name:'dispatch',description:'Create a DSH task in a permitted workspace. Provide exactly one of workspaceId or workspacePath (the exact absolute root directory on the DSH host; see workspaces). Reuse idempotencyKey on retry and subscribe to dsh.task.updated using the returned taskId.',inputSchema:{
+    ...object({workspaceId:str,workspacePath:str,goal:str,context:str,acceptance:str,idempotencyKey:str,model:modelSelection},['goal','acceptance','idempotencyKey']),
+    oneOf:[{required:['workspaceId']},{required:['workspacePath']}],
+  }},
   {name:'status',description:'Read one of your dispatched tasks.',inputSchema:object({taskId:str},['taskId'])},
   {name:'continue_task',description:'Queue a follow-up in the same DSH session. Returns a new taskId for this dispatch.',inputSchema:object({taskId:str,instruction:str,idempotencyKey:str},['taskId','instruction','idempotencyKey'])},
-  {name:'workspaces',description:'List permitted workspace IDs.',inputSchema:object({},[])}];
+  {name:'workspaces',description:'List permitted registered workspaces with their workspaceId, title and absolute workspacePath.',inputSchema:object({},[])}];
 const filter=object({taskId:str},['taskId']);
 const event={name:eventName,description:'A dispatched task returned, stopped, failed or needs attention.',delivery:['webhook'],inputSchema:filter,payloadSchema:{type:'object',properties:{taskId:str,sessionId:str,workspaceId:str,status:str,summary:{type:'string'},pendingInput:{type:'array',items:str}},required:['taskId','sessionId','status']}};
-export function endpoint({hop,owner,tasks,events,allowed}){
+export function endpoint({hop,owner,tasks,events}){
   return http.createServer({requestTimeout:15000,headersTimeout:10000},async(req,res)=>{
     const json=(code,data)=>{res.writeHead(code,{'content-type':'application/json','cache-control':'no-store'});res.end(data===undefined?'':JSON.stringify(data));};
     if(req.headers.origin || !equal(req.headers['x-dsh-tunnel'],hop))return json(403);
@@ -37,7 +40,7 @@ export function endpoint({hop,owner,tasks,events,allowed}){
           const a=p.arguments||{};const spec=tools.find(x=>x.name===p.name)?.inputSchema;
           if(!spec||spec.required.some(k=>typeof a[k]!=='string')||Object.keys(a).some(k=>!Object.hasOwn(spec.properties,k)))throw Error('Invalid tool arguments');
           let value;
-          switch(p.name){case 'workspaces':value=allowed.map(id=>({workspaceId:id}));break;
+          switch(p.name){case 'workspaces':value=tasks.workspaces();break;
             case 'dispatch':value=await tasks.submit(owner,a);break;
             case 'continue_task':value=await tasks.submit(owner,a,tasks.own(owner,a.taskId));break;
             case 'status':value=publicTask(tasks.own(owner,a.taskId));break;}
@@ -45,6 +48,11 @@ export function endpoint({hop,owner,tasks,events,allowed}){
         }else return json(200,{jsonrpc:'2.0',id,error:{code:-32601,message:'Unknown method'}});
       }
       json(200,{jsonrpc:'2.0',id,result});
-    }catch(e){json(200,{jsonrpc:'2.0',id,error:{code:e.rpcCode??-32602,message:e.rpcCode===-32015?'Callback verification failed':e instanceof InvalidModelSelection?e.message:'Request rejected; check arguments, access and configuration',...(e.rpcCode===-32015?{data:{reason:'challenge_failed'}}:{})}});}
+    }catch(e){
+      const challengeFailed=e.rpcCode===-32015;
+      const selectionError=e instanceof InvalidModelSelection||e instanceof WorkspaceSelectionError;
+      const message=challengeFailed?'Callback verification failed':selectionError?e.message:'Request rejected; check arguments, access and configuration';
+      json(200,{jsonrpc:'2.0',id,error:{code:e.rpcCode??-32602,message,...(challengeFailed?{data:{reason:'challenge_failed'}}:{})}});
+    }
   });
 }

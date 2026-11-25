@@ -27,7 +27,9 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 
 ## 在 Work 中使用
 
-例如：「列出我可以使用的工作区。在指定工作区做一项只读检查，返回会话 ID；订阅这次任务，完成或需要我介入时在这条对话告诉我。」`dispatch` 返回任务 ID 和会话 ID；`queued` 只表示指令已入队。`status` 查询任务，`continue_task` 在原会话排队。写入重试须使用相同的 `idempotencyKey` 和参数。每个新任务要按返回的 `taskId` 订阅 `dsh.task.updated`。
+例如：「列出我可以使用的工作区。在指定工作区做一项只读检查，返回会话 ID；订阅这次任务，完成或需要我介入时在这条对话告诉我。」`dispatch` 返回任务 ID 和会话 ID；`queued` 只表示指令已入队。`status` 查询任务，`continue_task` 在原会话排队。写入重试须使用相同的 `idempotencyKey` 和请求内容。每个新任务要按返回的 `taskId` 订阅 `dsh.task.updated`。
+
+`workspaces` 返回已授权且仍注册的工作区，每项含 `workspaceId`、`title` 和 `workspacePath`。调用 `dispatch` 时，在 `workspaceId` 和 `workspacePath` 中只填一项。按目录派发时，请使用 DSH 主机上的绝对工作区根目录（从 `workspaces` 复制 `workspacePath`）。连接器规范化路径后精确匹配，不从子目录向上寻找；如果没有匹配项或有多个匹配项，不会创建会话。有多个匹配项时请改用 `workspaceId`。同一个工作区可以在重试时换用等价的 ID 或目录，返回的仍是原任务和会话。
 
 新任务可以在 `dispatch` 中传入可选的 `model` 对象，例如：
 

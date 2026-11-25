@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { realpath, stat } from 'node:fs/promises';
+import { isAbsolute, relative, sep } from 'node:path';
 import { digest } from './network.js';
 
 export const eventName='dsh.task.updated';
@@ -45,11 +47,49 @@ export function fold(db,t,e) {
     }
   }
 }
+export class WorkspaceSelectionError extends Error {}
+const workspacePathNotFound='No permitted registered workspace matches workspacePath; use its exact directory from workspaces';
+
+async function canonicalWorkspacePath(path) {
+  if(typeof path!=='string'||!isAbsolute(path)||path.includes('\0'))
+    throw new WorkspaceSelectionError('workspacePath must be an absolute directory on the DSH host');
+  try {
+    // The registry stores canonical (realpath) directory paths. Do not resolve against the process cwd.
+    const canonical=await realpath(path);
+    if((await stat(canonical)).isDirectory())return canonical;
+  } catch {
+    // Do not expose host filesystem paths or errors to the caller.
+  }
+  throw new WorkspaceSelectionError(workspacePathNotFound);
+}
+
 export class Tasks {
   constructor(ctx,db,allowed){this.api=ctx.sessionController;this.registry=ctx.workspaceRegistry;this.llm=ctx.llm;this.sessions=ctx.sessions;this.db=db;this.allowed=allowed;this.locks=new Map();}
   own(owner,id){const t=this.db.get('task',text(id,128));if(!t||t.owner!==owner||!this.allowed.includes(t.workspaceId))throw Error('Task unavailable');return t;}
+  workspaces(){
+    return [...new Set(this.allowed)].flatMap(workspaceId=>{
+      const workspace=this.registry.get(workspaceId);
+      return workspace?[{workspaceId,title:workspace.title,workspacePath:workspace.path}]:[];
+    });
+  }
+  async resolveWorkspace(a){
+    const byId=Object.hasOwn(a,'workspaceId'),byPath=Object.hasOwn(a,'workspacePath');
+    if(byId===byPath)throw new WorkspaceSelectionError('Provide exactly one of workspaceId or workspacePath');
+    if(byId)return text(a.workspaceId,256);
+    const canonical=await canonicalWorkspacePath(a.workspacePath);
+    const workspaces=this.workspaces();
+    const matches=workspaces.filter(w=>w.workspacePath===canonical);
+    if(matches.length===1)return matches[0].workspaceId;
+    if(matches.length>1)throw new WorkspaceSelectionError('workspacePath matches multiple permitted workspaces; use workspaceId');
+    const isSubdirectory=workspaces.some(w=>{
+      const rel=relative(w.workspacePath,canonical);
+      return rel && rel!=='..' && !rel.startsWith('..'+sep) && !isAbsolute(rel);
+    });
+    if(isSubdirectory)throw new WorkspaceSelectionError('workspacePath is a subdirectory, not a permitted workspace root; use workspaces to find the exact directory');
+    throw new WorkspaceSelectionError(workspacePathNotFound);
+  }
   async submit(owner,a,parent){
-    const workspaceId=parent?.workspaceId??text(a.workspaceId,256);
+    const workspaceId=parent?.workspaceId??await this.resolveWorkspace(a);
     if(!this.allowed.includes(workspaceId)||!this.registry.get(workspaceId))throw Error('Workspace not permitted');
     const instruction=parent?text(a.instruction):[text(a.goal),`上下文：${a.context===undefined?'无':text(a.context)}`,`验收标准：${text(a.acceptance)}`].join('\n\n');
     const model=parent?undefined:parseModelSelection(a.model);
