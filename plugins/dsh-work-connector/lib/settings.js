@@ -1,16 +1,8 @@
-import { randomUUID, createPublicKey } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { proxyURL } from './network.js';
 
 const prefix = 'work-connector/settings-'; // Each DSH credential-key segment must start with a letter.
-const fields = [
-  'tunnelId',
-  'issuer',
-  'resource',
-  'jwksText',
-  'subjects',
-  'callbackHosts',
-  'workspaceIds',
-];
+const fields = ['tunnelId', 'callbackHosts', 'workspaceIds'];
 const invalid = (code) =>
   Object.assign(new Error(code), { publicCode: code, status: 400 });
 function scalar(v, max = 2048) {
@@ -25,63 +17,6 @@ function scalar(v, max = 2048) {
 function list(v) {
   if (!Array.isArray(v) || v.length > 256) throw invalid('invalid');
   return [...new Set(v.map((x) => scalar(x, 512)).filter(Boolean))];
-}
-function httpsURL(v) {
-  if (v) {
-    let u;
-    try {
-      u = new URL(v);
-    } catch {
-      throw invalid('https');
-    }
-    if (
-      u.protocol !== 'https:' ||
-      u.username ||
-      u.password ||
-      u.hash ||
-      u.search
-    )
-      throw invalid('https');
-  }
-  return v;
-}
-export function publicKeys(s) {
-  if (!s) return '';
-  try {
-    const j = JSON.parse(s);
-    if (!Array.isArray(j.keys) || !j.keys.length || j.keys.length > 64)
-      throw Error();
-    const keys = j.keys.map((k) => {
-      if (
-        !['RSA', 'EC', 'OKP'].includes(k.kty) ||
-        ['d', 'p', 'q', 'dp', 'dq', 'qi', 'oth', 'k'].some((n) =>
-          Object.hasOwn(k, n),
-        )
-      )
-        throw Error();
-      const clean = Object.fromEntries(
-        Object.entries(k).filter(([n]) =>
-          [
-            'kty',
-            'kid',
-            'alg',
-            'use',
-            'key_ops',
-            'e',
-            'n',
-            'crv',
-            'x',
-            'y',
-          ].includes(n),
-        ),
-      );
-      createPublicKey({ key: clean, format: 'jwk' });
-      return clean;
-    });
-    return JSON.stringify({ keys }, null, 2);
-  } catch {
-    throw invalid('jwks');
-  }
 }
 export async function storedSecrets(ctx, config) {
   if (!config.credentialId) return {};
@@ -112,17 +47,15 @@ export function settingsController(ctx, config, preflight) {
       fields.map((k) => [
         k,
         config[k] ??
-          (['subjects', 'workspaceIds', 'callbackHosts'].includes(k) ? [] : ''),
+          (['workspaceIds', 'callbackHosts'].includes(k) ? [] : ''),
       ]),
     );
-    values.jwksText = publicKeys(values.jwksText);
     return {
       version,
       enabled: !!config.enabled,
       values,
       hasKey: !!sec.key,
       hasProxy: !!sec.proxy,
-      hasKeyFile: !!config.jwksFile,
       workspaces: ctx.workspaceRegistry
         .list()
         .map(({ id, title, path }) => ({ id, title, path })),
@@ -161,10 +94,6 @@ export function settingsController(ctx, config, preflight) {
         throw invalid('invalid');
       const patch = {
         tunnelId: scalar(v.tunnelId),
-        issuer: httpsURL(scalar(v.issuer)),
-        resource: httpsURL(scalar(v.resource)),
-        jwksText: publicKeys(scalar(v.jwksText, 65536)),
-        subjects: list(v.subjects),
         workspaceIds: list(v.workspaceIds),
         callbackHosts: list(v.callbackHosts).map((s) => s.toLowerCase()),
       };
@@ -207,15 +136,15 @@ export function settingsController(ctx, config, preflight) {
       }
       // Publish the reference only after the new immutable record is durable.
       // A save failure cannot replace the credential used by the current config.
-      if (patch.jwksText || data.clearKeyFile === true) patch.jwksFile = '';
       const credentials = ctx.credentials,
         oldId = config.credentialId;
       try {
-        await ctx.configEditor.edit(entry, (c) => ({
-          ...c,
-          ...patch,
-          enabled: false,
-        }));
+        await ctx.configEditor.edit(entry, (c) => {
+          // Drop retired configuration on save, without touching other profile settings.
+          const next = { ...c, ...patch, enabled: false };
+          for (const key of ['issuer', 'resource', 'subjects', 'jwksText', 'jwksFile']) delete next[key];
+          return next;
+        });
       } catch (err) {
         // ConfigEditor rejects before publication or after restoring the old patch.
         if (rotate) await credentials.deleteRecord(prefix + patch.credentialId);

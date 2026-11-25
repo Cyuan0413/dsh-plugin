@@ -10,11 +10,10 @@ const tools=[
   {name:'workspaces',description:'List permitted workspace IDs.',inputSchema:object({},[])}];
 const filter=object({taskId:str},['taskId']);
 const event={name:eventName,description:'A dispatched task returned, stopped, failed or needs attention.',delivery:['webhook'],inputSchema:filter,payloadSchema:{type:'object',properties:{taskId:str,sessionId:str,workspaceId:str,status:str,summary:{type:'string'},pendingInput:{type:'array',items:str}},required:['taskId','sessionId','status']}};
-export function endpoint({hop,auth,tasks,events,allowed}){
+export function endpoint({hop,owner,tasks,events,allowed}){
   return http.createServer({requestTimeout:15000,headersTimeout:10000},async(req,res)=>{
     const json=(code,data)=>{res.writeHead(code,{'content-type':'application/json','cache-control':'no-store'});res.end(data===undefined?'':JSON.stringify(data));};
     if(req.headers.origin || !equal(req.headers['x-dsh-tunnel'],hop))return json(403);
-    if(req.method==='GET' && ['/.well-known/oauth-protected-resource','/.well-known/oauth-protected-resource/mcp'].includes(req.url))return json(200,auth.metadata);
     if(req.url!=='/mcp')return json(404);
     if(req.method!=='POST')return json(405);
     let id=null;
@@ -31,8 +30,6 @@ export function endpoint({hop,auth,tasks,events,allowed}){
       else if(m.method==='tools/list')result={tools};
       else if(m.method==='events/list')result={events:[event]};
       else{
-        const owner=await auth.authenticate(req.headers.authorization);
-        if(!owner){res.setHeader('WWW-Authenticate',`Bearer resource_metadata="${new URL('/.well-known/oauth-protected-resource'+new URL(auth.metadata.resource).pathname,auth.metadata.resource)}", scope="dsh.work"`);return json(401);}
         if(m.method==='events/subscribe'||m.method==='events/unsubscribe')result=await events.subscription(owner,p,m.method==='events/unsubscribe');
         else if(m.method==='tools/call'){
           const a=p.arguments||{};const spec=tools.find(x=>x.name===p.name)?.inputSchema;

@@ -5,7 +5,7 @@ window.__ModuleLoader__.load({
       h = R.createElement;
     const zh = {
       title: 'Work 连接器',
-      intro: '把 Work 对话中的任务交给本机工作区，并向原对话回报结果。',
+      intro: '仅供本人使用。请勿共享此 Tunnel 或 ChatGPT 连接器；能使用连接器的人都可以向选中的工作区派发任务。',
       connection: '连接设置',
       tunnelId: 'Tunnel ID',
       key: 'Tunnel 运行密钥',
@@ -18,14 +18,7 @@ window.__ModuleLoader__.load({
       clear: '清除已存值',
       workspaces: '允许派发的工作区',
       noWorkspace: '还没有工作区，请先在 DSH 侧边栏添加。',
-      advanced: '授权与事件回报',
-      issuer: 'OAuth 签发方（issuer）',
-      resource: 'MCP 资源地址（audience）',
-      jwksText: 'JWT 验签公钥集（JWKS）',
-      publicOnly: '只粘贴授权服务器的公钥 JSON，不要粘贴私钥。',
-      file: '当前使用已有的服务器公钥文件。填写公钥集可替换它。',
-      clearFile: '取消使用已有公钥文件',
-      subjects: '允许的用户（sub）',
+      advanced: '事件回报',
       callbackHosts: '允许的回调域名',
       onePerLine: '每行一项',
       hostsHint: '填写实际回调主机名，不带协议、路径或通配符。',
@@ -52,11 +45,9 @@ window.__ModuleLoader__.load({
       busy: '正在处理…',
       access: '仅已登录的面板所有者可操作。',
       stale: '配置已经变化，请重新载入后再保存。',
-      incomplete: '无法启用：请核对连接信息、授权公钥、允许用户和回调域名。',
+      incomplete: '无法启用：请核对Tunnel ID、运行密钥、出站代理、工作区和回调域名。',
       workspace: '请选择仍然存在的 DSH 工作区。',
       hosts: '回调域名格式不正确。',
-      https: '签发方和资源地址需要使用不含凭据的 HTTPS URL。',
-      jwks: 'JWKS 需要包含可用的非对称公钥，不能包含私钥。',
       invalid: '字段格式无效或过长。',
       proxyError: '请输入有效的 HTTP(S) 代理地址。',
       saveFailed: '操作未确认，请重新载入配置核对。',
@@ -66,7 +57,7 @@ window.__ModuleLoader__.load({
     const en = {
       title: 'Work connector',
       intro:
-        'Run Work tasks in a local workspace and report back to the originating chat.',
+        'For personal use only. Do not share this tunnel or connector: anyone with access can dispatch tasks to the selected workspaces.',
       connection: 'Connection settings',
       tunnelId: 'Tunnel ID',
       key: 'Tunnel runtime key',
@@ -79,14 +70,7 @@ window.__ModuleLoader__.load({
       clear: 'Clear saved value',
       workspaces: 'Allowed workspaces',
       noWorkspace: 'Add a workspace in the sidebar first.',
-      advanced: 'Authorization and events',
-      issuer: 'OAuth issuer',
-      resource: 'MCP resource (audience)',
-      jwksText: 'Verification keys (JWKS)',
-      publicOnly: 'Paste public JWKS JSON only, never private keys.',
-      file: 'An existing server key file is in use. Paste a key set to replace it.',
-      clearFile: 'Stop using the existing key file',
-      subjects: 'Allowed subjects (sub)',
+      advanced: 'Event delivery',
       callbackHosts: 'Allowed callback hosts',
       onePerLine: 'One entry per line',
       hostsHint: 'Hostnames only; no scheme, path or wildcard.',
@@ -114,18 +98,16 @@ window.__ModuleLoader__.load({
       access: 'An authenticated owner session is required.',
       stale: 'Settings changed. Reload before saving.',
       incomplete:
-        'Check tunnel, credentials, keys, subjects and callback hosts before enabling.',
+        'Check tunnel ID, runtime key, proxy, workspaces and callback hosts before enabling.',
       workspace: 'Select an existing workspace.',
       hosts: 'Enter exact callback hostnames.',
-      https: 'Use HTTPS URLs without credentials.',
-      jwks: 'Enter valid asymmetric public keys only.',
       invalid: 'Invalid or oversized field.',
       proxyError: 'Enter a valid HTTP(S) proxy.',
       saveFailed: 'Operation not confirmed. Reload to verify.',
       failure: 'Request failed. Check the connection or refresh the page.',
       discard: 'Discard unsaved changes and reload?',
     };
-    const css = `.wc-settings{color:var(--dsw-alias-label-primary);max-width:48rem;display:grid;gap:1.15rem;padding-bottom:1rem}.wc-settings h3,.wc-settings h4,.wc-settings p{margin:0}.wc-settings h3{font-size:1.12rem}.wc-settings h4{font-size:.95rem}.wc-settings .muted,.wc-settings small{color:var(--dsw-alias-label-secondary);font-size:.85em}.wc-settings fieldset{margin:0;padding:0;border:0;min-width:0;display:grid;gap:.85rem}.wc-settings .field{display:grid;gap:.35rem;font-size:.92em}.wc-settings .box{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:.45rem .6rem}.wc-settings textarea{resize:vertical}.wc-settings .box:focus-visible,.wc-settings button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary)}.wc-settings .row{display:flex;gap:.65rem;align-items:center;flex-wrap:wrap}.wc-settings .block{border-top:1px solid var(--dsw-alias-border-l1);padding-top:.85rem;display:grid;gap:.65rem}.wc-settings details>summary{cursor:pointer;font-weight:600}.wc-settings details[open]>summary{margin-bottom:.8rem}.wc-settings button{font:inherit;cursor:pointer;border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit;border:1px solid var(--dsw-alias-border-l2);padding:.38rem .8rem}.wc-settings button:disabled{opacity:.5;cursor:default}.wc-settings .primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}.wc-settings .error{color:var(--dsw-alias-state-error-primary)}.wc-settings input[type=checkbox]{accent-color:var(--dsw-alias-brand-primary)}.wc-settings label{overflow-wrap:anywhere}.wc-settings .badge{background:var(--dsw-alias-bg-layer-2);border-radius:12px;padding:.15rem .55rem}`;
+    const css = `.wc-settings{color:var(--dsw-alias-label-primary);max-width:48rem;display:grid;gap:1.15rem;padding-bottom:1rem}.wc-settings h3,.wc-settings h4,.wc-settings p{margin:0}.wc-settings h3{font-size:1.12rem}.wc-settings h4{font-size:.95rem}.wc-settings .muted,.wc-settings small{color:var(--dsw-alias-label-secondary);font-size:.85em}.wc-settings fieldset{margin:0;padding:0;border:0;min-width:0;display:grid;gap:.85rem}.wc-settings .field{display:grid;gap:.35rem;font-size:.92em}.wc-settings .box{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:7px;padding:.45rem .6rem}.wc-settings textarea{resize:vertical}.wc-settings .box:focus-visible,.wc-settings button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary)}.wc-settings .row{display:flex;gap:.65rem;align-items:center;flex-wrap:wrap}.wc-settings .block{border-top:1px solid var(--dsw-alias-border-l1);padding-top:.85rem;display:grid;gap:.65rem}.wc-settings button{font:inherit;cursor:pointer;border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit;border:1px solid var(--dsw-alias-border-l2);padding:.38rem .8rem}.wc-settings button:disabled{opacity:.5;cursor:default}.wc-settings .primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}.wc-settings .error{color:var(--dsw-alias-state-error-primary)}.wc-settings input[type=checkbox]{accent-color:var(--dsw-alias-brand-primary)}.wc-settings label{overflow-wrap:anywhere}.wc-settings .badge{background:var(--dsw-alias-bg-layer-2);border-radius:12px;padding:.15rem .55rem}`;
     const lines = (s) =>
       s
         .split('\n')
@@ -188,7 +170,6 @@ window.__ModuleLoader__.load({
             B(b);
             F({
               ...b.values,
-              subjects: b.values.subjects.join('\n'),
               callbackHosts: b.values.callbackHosts.join('\n'),
             });
             S({});
@@ -209,7 +190,6 @@ window.__ModuleLoader__.load({
           }, []);
           const v = {
             ...form,
-            subjects: lines(form.subjects ?? ''),
             callbackHosts: lines(form.callbackHosts ?? ''),
           };
           const dirty =
@@ -292,7 +272,7 @@ window.__ModuleLoader__.load({
               { className: 'field' },
               h('strong', null, t(key)),
               area
-                ? h('textarea', { ...props, rows: key === 'jwksText' ? 5 : 2 })
+                ? h('textarea', { ...props, rows: 2 })
                 : h('input', props),
               hint && h('small', null, t(hint)),
             );
@@ -413,30 +393,9 @@ window.__ModuleLoader__.load({
                     ),
                   ),
                   h(
-                    'details',
+                    'div',
                     { className: 'block' },
-                    h('summary', null, t('advanced')),
-                    field('issuer', null, 'https://id.example.org'),
-                    field('resource', null, 'https://…'),
-                    field('jwksText', 'publicOnly', '{"keys": […]}', true),
-                    base.hasKeyFile &&
-                      h(
-                        'label',
-                        null,
-                        h('input', {
-                          type: 'checkbox',
-                          checked: !!secret.clearKeyFile,
-                          onChange: (e) =>
-                            changeSecret(
-                              'clearKeyFile',
-                              e.target.checked || '',
-                            ),
-                        }),
-                        ' ',
-                        t('clearFile'),
-                        h('small', null, ' ', t('file')),
-                      ),
-                    field('subjects', 'onePerLine', '', true),
+                    h('h4', null, t('advanced')),
                     field('callbackHosts', 'hostsHint', t('onePerLine'), true),
                   ),
                 ),

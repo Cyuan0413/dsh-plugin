@@ -15,15 +15,15 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 安装后默认不联网。面板所有者打开「设置 → Work 连接器」即可填写全部连接参数，不必编辑 profile 或设置进程环境变量。
 
 1. **连接设置**：填写 OpenAI Platform 上关联了目标 ChatGPT 工作区的 Tunnel ID 和运行密钥（Tunnel Read + Use，不使用管理密钥）。填写 HTTP(S) 出站代理，然后勾选允许派发的现有 Workspace。Tunnel 控制面、订阅验证和签名回报共用该代理；缺少代理不会启动，连接失败不回退直连。
-2. **授权与事件回报**：填写 OAuth 签发方 `issuer` 和资源地址 `resource`（须与 JWT 的 `iss`、`aud` 分别一致），粘贴该签发方的**公开 JWKS**，每行填写一个允许的用户 `sub` 和一个经核实的回调主机名。插件只验证访问令牌，不负责登录或签发；令牌须有 `exp` 和 `dsh.work` scope。回调只接受精确域名、标准 HTTPS 端口和本机可解析的公网 IPv4；代理须允许向目标 IP 的 443 端口 CONNECT。
+2. **事件回报**：每行填写一个经核实的回调主机名。回调只接受精确域名、标准 HTTPS 端口和本机可解析的公网 IPv4；代理须允许向目标 IP 的 443 端口 CONNECT。
 3. **保存配置**只保存草稿，不建立网络连接。确认后单独点**启用连接**，再刷新运行状态。运行时要改参数，先点**停用连接**；这不会中止已受理的 DSH 任务。
-4. 在 ChatGPT 添加自定义 MCP 服务，连接方式选 **Tunnel**，选择目标 Tunnel 并配置 OAuth。见 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) 和 [MCP Events](https://developers.openai.com/plugins/build/mcp-events)。
+4. 在 ChatGPT 添加自定义 MCP 服务，连接方式选 **Tunnel**，选择目标 Tunnel，认证方式选 **No authentication（无认证）**。见 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) 和 [MCP Events](https://developers.openai.com/plugins/build/mcp-events)。
 
 **代理用户名和密码（Basic 认证）**：在「出站代理」直接填写 `https://用户名:密码@代理主机:端口`。只对用户名和密码分别做 URL 百分号编码，不编码整个地址。例如虚构密码 `p@ss:word` 应写成 `p%40ss%3Aword`。代理提供 TLS 时优先用 `https://`；使用 `http://` 时，到代理这一段不会加密 Basic 凭据。代理凭据用于 CONNECT，不作为签名回报的请求头发给回调服务。
 
-运行密钥和代理地址只写入 DSH 凭据存储，不回显。再次保存时留空会保留原值，勾选「清除已存值」才会清除。不要在聊天、日志或截图中提供凭据；只在受信任的 HTTPS 面板或本机回环上配置。已有 profile 的代理、`DSH_WORK_TUNNEL_KEY`、`jwksFile` 可继续使用；在界面替换或清除相应字段后，以新设置为准。
+运行密钥和代理地址只写入 DSH 凭据存储，不回显。再次保存时留空会保留原值，勾选「清除已存值」才会清除。不要在聊天、日志或截图中提供凭据；只在受信任的 HTTPS 面板或本机回环上配置。已有 profile 的代理和 `DSH_WORK_TUNNEL_KEY` 可继续使用；在界面替换或清除相应字段后，以新设置为准。
 
-允许的用户共享配置中的 Workspace 白名单，但查询、续办和订阅按派发者隔离。只将工作区授权给受信任的操作者：该白名单限制派发位置，不会降低 DSH Agent 本身的工具权限。
+**仅供本人使用。** 不要共享 Tunnel 或 ChatGPT 连接器。能通过这条连接调用工具的人均使用同一身份；工作区白名单限制派发位置，不降低 DSH Agent 的工具权限。任务和订阅归属当前 Tunnel，切换到另一条 Tunnel 不会接管旧任务。升级前按用户身份派发的任务不会自动转入单人连接；已有会话仍可在 DSH 面板中打开。
 
 ## 在 Work 中使用
 
@@ -33,7 +33,7 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 
 ## 排障与数据
 
-- **隧道未就绪**：检查 Tunnel 绑定、运行凭据、代理与 OAuth 元数据可达性。设置页「刷新」重新读取官方运行时的就绪状态。不要以仅有子进程作为连通依据。
+- **隧道未就绪**：检查 Tunnel 绑定、运行凭据、代理连通性。设置页「刷新」重新读取官方运行时的就绪状态。不要以仅有子进程作为连通依据。
 - **能派活、收不到回报**：确认原 Work 对话已经订阅正确的任务、验证挑战通过，检查域名白名单及代理的 CONNECT 策略。设置页将待送、重试和停止投递的订阅分开显示。连续失败达到重试上限、HTTP 410 或 413 会停止该订阅的投递；排除原因后重新订阅。
 - **重启与数据保护**：任务归属、派发请求 ID、待投事件、订阅回调 URL 和签名密钥保存在当前 profile 的私有 `work-connector` 目录中。文件权限不是加密；不要共享或上传数据库。事件采用至少一次投递，重试保留事件 ID。启用前请按自身留存要求管理这份数据。
 

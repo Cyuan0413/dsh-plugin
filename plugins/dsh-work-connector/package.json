@@ -35,8 +35,7 @@
   },
   "dependencies": {
     "https-proxy-agent": "7.0.6",
-    "ipaddr.js": "2.2.0",
-    "jose": "6.2.18"
+    "ipaddr.js": "2.2.0"
   },
   "scripts": {
     "test": "node --test test/*.test.js"

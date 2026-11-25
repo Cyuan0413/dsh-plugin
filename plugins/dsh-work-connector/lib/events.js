@@ -3,7 +3,7 @@ import { eventName } from './tasks.js';
 
 const DAY=86400000;
 export class Events {
-  constructor(db,tasks,send,hosts,owners){Object.assign(this,{db,tasks,send,hosts,owners});}
+  constructor(db,tasks,send,hosts,owner){Object.assign(this,{db,tasks,send,hosts,owner});}
   async subscription(owner,p,remove=false){
     const idTask=p.arguments?.taskId;
     if(p.name!==eventName||!idTask||Object.keys(p.arguments).length!==1||p.delivery?.mode!=='webhook')throw Error('Invalid subscription');
@@ -25,7 +25,7 @@ export class Events {
   }
   async drain(){
     for(const s of this.db.all('sub')){
-      if(!this.owners.has(s.owner)||s.expiry<=Date.now()||s.next>Date.now()||s.halted)continue;
+      if(s.owner!==this.owner||s.expiry<=Date.now()||s.next>Date.now()||s.halted)continue;
       try{this.tasks.own(s.owner,s.taskId);}catch{continue;}
       const e=this.db.all('event').find(e=>e.taskId===s.taskId && e.n>s.cursor);if(!e)continue;
       let code=0;try{code=(await this.send(s,e.id,{eventId:e.id,name:e.name,timestamp:e.timestamp,data:e.data,cursor:String(e.n)})).status;}catch{/* Retry the same event, never switch network routes. */}

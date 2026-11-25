@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
 import { once } from 'node:events';
 import http from 'node:http';
 import { environment } from '../lib/index.js';
@@ -10,13 +9,6 @@ import {
   storedSecrets,
 } from '../lib/settings.js';
 
-const jwksText = JSON.stringify({
-  keys: [
-    generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({
-      format: 'jwk',
-    }),
-  ],
-});
 function harness() {
   let config = { enabled: false },
     controller;
@@ -63,11 +55,7 @@ test('配置可在未启用时保存，密钥与认证代理不出现在回读/�
     ...page.values,
     tunnelId: 'tunnel_test',
     workspaceIds: ['w'],
-    issuer: 'https://issuer.example',
-    resource: 'https://resource.example/mcp',
-    subjects: ['me'],
     callbackHosts: ['cb.example'],
-    jwksText,
   };
   await assert.rejects(
     h.api.write({ action: 'enable', version: page.version }),
@@ -120,13 +108,13 @@ test('配置可在未启用时保存，密钥与认证代理不出现在回读/�
   page = await h.api.view();
   assert.ok(!page.hasKey && !page.hasProxy);
 });
-test('无效代理、私钥和未注册工作区不会写入配置或凭据', async () => {
+test('无效代理、回调域名和未注册工作区不会写入配置或凭据', async () => {
   const h = harness(),
     { version, values } = await h.api.view();
   for (const change of [
     { proxy: 'file:///tmp/p' },
     {
-      values: { ...values, jwksText: '{"keys":[{"kty":"EC","d":"private"}]}' },
+      values: { ...values, callbackHosts: ['*.example.org'] },
     },
     { values: { ...values, workspaceIds: ['missing'] } },
   ])

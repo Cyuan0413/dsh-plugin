@@ -38,7 +38,7 @@ test('签名验证和事件经同一真实 CONNECT 代理，绑定目标 IP、SN
 test('内置 Go 运行时向配置的代理建立控制面 CONNECT', {timeout:12000},async t=>{
   const proxy=http.createServer();const contacted=once(proxy,'connect',{signal:AbortSignal.timeout(8000)});proxy.on('connect',(_q,s)=>{s.on('error',()=>{});s.end('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n');});const port=await listen(proxy);t.after(()=>proxy.close());
   const local=http.createServer((_q,r)=>{r.writeHead(404);r.end();});const mport=await listen(local);t.after(()=>local.close());
-  const dir=mkdtempSync(join(tmpdir(),'work-run-'));const spec=runtimeSpec({issuer:'https://issuer.invalid',tunnelId:'tunnel_0123456789abcdef0123456789abcdef'},{proxy:authedProxy(port),key:'test-only'},`http://127.0.0.1:${mport}/mcp`,'test-hop',join(dir,'health.sock'));
+  const dir=mkdtempSync(join(tmpdir(),'work-run-'));const spec=runtimeSpec({tunnelId:'tunnel_0123456789abcdef0123456789abcdef'},{proxy:authedProxy(port),key:'test-only'},`http://127.0.0.1:${mport}/mcp`,'test-hop',join(dir,'health.sock'));
   const child=spawn(fileURLToPath(new URL('../vendor/tunnel-client-runtime',import.meta.url)),[...spec.args,'--control-plane.base-url','https://tunnel.invalid'],{env:spec.env,stdio:'ignore'});t.after(async()=>{if(child.exitCode===null&&!child.signalCode){const end=once(child,'close');child.kill();await end;}});
   const [request]=await contacted;assert.equal(request.url,'tunnel.invalid:443');assert.equal(request.headers['proxy-authorization'],expectedAuth);
 });
