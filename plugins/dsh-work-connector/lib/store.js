@@ -9,12 +9,18 @@ export class Store {
     mkdirSync(dir,{recursive:true,mode:0o700}); chmodSync(dir,0o700);
     this.db=new DatabaseSync(join(dir,'connector.db')); chmodSync(join(dir,'connector.db'),0o600);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-      CREATE TABLE IF NOT EXISTS records(kind TEXT,id TEXT,data TEXT,PRIMARY KEY(kind,id));`);
+      CREATE TABLE IF NOT EXISTS records(kind TEXT,id TEXT,data TEXT,PRIMARY KEY(kind,id));
+      CREATE TABLE IF NOT EXISTS notification_order (id INTEGER PRIMARY KEY CHECK(id=1), n INTEGER NOT NULL);
+      INSERT OR IGNORE INTO notification_order VALUES (1,0);`);
     this.read=this.db.prepare('SELECT data FROM records WHERE kind=? AND id=?');
     this.rows=this.db.prepare('SELECT data FROM records WHERE kind=? ORDER BY rowid');
     this.write=this.db.prepare('INSERT OR REPLACE INTO records(kind,id,data) VALUES(?,?,?)');
     this.del=this.db.prepare('DELETE FROM records WHERE kind=? AND id=?');
+    this.readOrder=this.db.prepare('SELECT n FROM notification_order WHERE id=1');
+    this.advanceOrder=this.db.prepare('UPDATE notification_order SET n=n+1 WHERE id=1 RETURNING n');
   }
+  currentOrder() {return this.readOrder.get().n;}
+  nextOrder() {return this.advanceOrder.get().n;}
   get(kind,id) { const row=this.read.get(kind,id);return row && JSON.parse(row.data); }
   all(kind) { return this.rows.all(kind).map(row=>JSON.parse(row.data)); }
   put(kind,item) { this.write.run(kind,item.id,JSON.stringify(item)); }
