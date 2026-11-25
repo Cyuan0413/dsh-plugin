@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,realpathSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Store} from '../lib/store.js';
@@ -9,19 +9,22 @@ import {Events} from '../lib/events.js';
 import {endpoint} from '../lib/mcp.js';
 import {once} from 'node:events';
 const fresh=()=>mkdtempSync(join(tmpdir(),'work-state-'));
-const args={workspaceId:'w',goal:'test',acceptance:'done',idempotencyKey:'one'};
+const dispatchArgs={goal:'test',acceptance:'done',idempotencyKey:'one'};
+const args={workspaceId:'w',...dispatchArgs};
 const defaultModel={provider:'default',model:'default/model'};
 const selectedModel={provider:'alternate',model:'shared/model'};
-const host=()=>{
-  const history=new Map(),prompts=[],selections=[],runningModels=[],agents=new Map();let made=0;
-  return {history,prompts,selections,runningModels,get made(){return made;},
-    workspaceRegistry:{get:id=>id==='w'?{sessionIds:[...history.keys()]}:null},
+const host=(records=new Map([['w',{title:'Workspace',path:process.cwd()}]]))=>{
+  const history=new Map(),prompts=[],selections=[],runningModels=[],created=[],agents=new Map();
+  return {history,prompts,selections,runningModels,created,get made(){return created.length;},
+    workspaceRegistry:{get(id){
+      const workspace=records.get(id);return workspace&&{...workspace,sessionIds:[...history.keys()]};
+    }},
     llm:{async listModels(provider){return provider==='alternate'?[{id:'shared/model'},{id:'unavailable'}]:[];},
       async resolveCallConfig(selection){if(selection.model==='unavailable')throw Error('provider configuration failed');return selection;}},
     sessions:{async flush(session){session.durableModel=session.currentModel;return true;}},
     sessionController:{
-      async create({sessionId}){
-        made++;history.set(sessionId,[]);
+      async create({workspaceId,sessionId}){
+        created.push({workspaceId,sessionId});history.set(sessionId,[]);
         const session={currentModel:defaultModel,durableModel:defaultModel};
         agents.set(sessionId,{session,model:{select(model){session.currentModel=model;selections.push({sessionId,model});}}});
         return {sessionId};
@@ -38,7 +41,7 @@ const host=()=>{
   };
 };
 async function client(t,tasks){
-  const server=endpoint({hop:'local-secret',owner:'tunnel:personal',tasks,allowed:['w']});
+  const server=endpoint({hop:'local-secret',owner:'tunnel:personal',tasks});
   server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>server.close());
   const url=`http://127.0.0.1:${server.address().port}/mcp`;
   const headers={'X-DSH-Tunnel':'local-secret'};
@@ -47,6 +50,14 @@ async function client(t,tasks){
   const rawCall=async(name,args)=>(await post(name,args)).json();
   const call=async(name,args)=>{const {result,error}=await rawCall(name,args);assert.equal(error,undefined);return JSON.parse(result.content[0].text);};
   return {headers,rpc,post,rawCall,call};
+}
+
+function workspaceFixture(t,records,allowed){
+  const dir=realpathSync(fresh());
+  const db=new Store(join(dir,'state'));
+  t.after(()=>{db.close();rmSync(dir,{recursive:true,force:true});});
+  const h=host(records);
+  return {dir,db,h,tasks:new Tasks(h,db,allowed)};
 }
 function append(log,type,data){log.push({seq:log.length,type,data,time:Date.now()});}
 test('并发重试只创建一次，快任务先于订阅、重启后重发同一事件，手工续办不重复回报',async()=>{
@@ -72,7 +83,6 @@ test('个人 Tunnel 无需用户令牌；本地跳凭据、工作区与任务归
   assert.equal((await post('dispatch',args,{})).status,403);
   assert.equal((await post('dispatch',args,{'X-DSH-Tunnel':'wrong'})).status,403);
   assert.equal((await post('dispatch',args,{...headers,Origin:'https://example.org'})).status,403);
-  assert.deepEqual(await call('workspaces'),[{workspaceId:'w'}]);
   assert.ok((await (await post('dispatch',{...args,workspaceId:'other'})).json()).error);
   const old=await tasks.submit('different-owner',args);
   assert.ok((await (await post('status',{taskId:old.taskId})).json()).error);
@@ -140,4 +150,59 @@ test('恢复时先完成选模；不确定的入队重试只重用原请求 ID',
   assert.equal(h.made,1);
   assert.equal(h.selections.length,1);
   assert.deepEqual(h.prompts.map(({requestId})=>requestId),['first-prompt','first-prompt']);
+});
+
+test('列出已授权且仍注册的工作区，按目录或 ID 派发并可交叉重试',async t=>{
+  const records=new Map();
+  const {dir,db,h,tasks}=workspaceFixture(t,records,['w','deleted']);
+  const path=join(dir,'repo'),src=join(path,'src'),alias=join(dir,'alias');
+  mkdirSync(src,{recursive:true});
+  symlinkSync(path,alias,'dir');
+  records.set('w',{title:'Project',path});
+  records.set('unauthorized',{title:'Hidden',path});
+  const {rpc,call}=await client(t,tasks);
+  assert.deepEqual(await call('workspaces'),[{workspaceId:'w',title:'Project',workspacePath:path}]);
+  const {result}=await (await rpc('tools/list')).json();
+  const {inputSchema}=result.tools.find(tool=>tool.name==='dispatch');
+  assert.equal(inputSchema.properties.workspacePath.type,'string');
+  assert.deepEqual(inputSchema.oneOf,[{required:['workspaceId']},{required:['workspacePath']}]);
+  assert.ok(!inputSchema.required.includes('workspaceId'));
+
+  const byPath=await call('dispatch',{...dispatchArgs,workspacePath:`${src}/../`,model:selectedModel});
+  assert.equal(byPath.workspaceId,'w');
+  assert.deepEqual(await call('dispatch',{...args,model:selectedModel}),byPath);
+  const byId=await call('dispatch',{...args,idempotencyKey:'two'});
+  assert.deepEqual(await call('dispatch',{...dispatchArgs,idempotencyKey:'two',workspacePath:alias}),byId);
+  assert.deepEqual(h.runningModels,[selectedModel,defaultModel]);
+  assert.notEqual(byId.taskId,byPath.taskId);
+  assert.deepEqual(h.created,[byPath,byId].map(({workspaceId,sessionId})=>({workspaceId,sessionId})));
+  assert.equal(h.prompts.length,2);
+  assert.equal(db.all('task').length,2);
+});
+
+test('无效、越权或歧义的工作区定位不会创建会话或写入任务',async t=>{
+  const records=new Map();
+  const {dir,db,h,tasks}=workspaceFixture(t,records,['w','duplicate','deleted']);
+  const path=join(dir,'repo'),src=join(path,'src'),hidden=join(dir,'repo-other'),file=join(path,'file');
+  const deleted=join(dir,'deleted');
+  mkdirSync(src,{recursive:true});mkdirSync(hidden);mkdirSync(deleted);writeFileSync(file,'');
+  records.set('w',{title:'Project',path});
+  records.set('unauthorized',{title:'Hidden',path:hidden});
+  const {rawCall}=await client(t,tasks);
+  const rejects=async(args,message)=>{
+    const {error,result}=await rawCall('dispatch',args);
+    assert.equal(result,undefined);assert.equal(error?.code,-32602);assert.match(error.message,message);
+  };
+  for(const [locator,message] of [
+    [{},/exactly one/],
+    [{workspaceId:'w',workspacePath:path},/exactly one/],
+    [{workspaceId:'w',workspacePath:null},/exactly one/],
+    [{workspacePath:'repo'},/absolute directory/],
+    [{workspacePath:src,model:selectedModel},/subdirectory/],
+    ...[hidden,deleted,file,join(dir,'missing')].map(path=>[{workspacePath:path},/No permitted registered workspace/]),
+  ])await rejects({...dispatchArgs,...locator},message);
+  await rejects({...dispatchArgs,workspacePath:path,model:{model:selectedModel.model}},/provider and model IDs/);
+  records.set('duplicate',{title:'Duplicate',path});
+  await rejects({...dispatchArgs,workspacePath:path},/multiple permitted workspaces/);
+  assert.equal(h.made,0);assert.equal(h.prompts.length,0);assert.deepEqual(db.all('task'),[]);
 });

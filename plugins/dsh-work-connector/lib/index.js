@@ -57,7 +57,7 @@ async function start(ctx,config,stored,publish,setStage){
   // Scope persisted tasks to this private tunnel, never to caller-supplied identity.
   const owner='tunnel:'+config.tunnelId;
   const tasks=new Tasks(ctx,db,config.workspaceIds);const events=new Events(db,tasks,sender({proxy:setup.proxy}),owner);
-  const hop=randomBytes(32).toString('hex');const server=endpoint({hop,owner,tasks,events,allowed:config.workspaceIds});
+  const hop=randomBytes(32).toString('hex');const server=endpoint({hop,owner,tasks,events});
   let stopping=false,child,restart,timer,pump,delay=1000;
   const stop=async()=>{
     stopping=true;clearTimeout(restart);clearInterval(timer);
