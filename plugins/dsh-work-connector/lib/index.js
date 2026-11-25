@@ -16,7 +16,7 @@ import {settingsRoute,settingsController,storedSecrets,effectiveSecrets} from '.
 import {healthRoute,tunnelReady} from './health.js';
 
 export const name='work-connector';
-export const inject=['sessionController','workspaceRegistry','webServer','connection','credentials','configEditor','profileContext','llm','sessions'];
+export const inject=['sessionController','workspaceRegistry','webServer','connection','credentials','configEditor','profileContext','llm','sessions','agentPresets'];
 export const Config=z.object({
   enabled:z.boolean().default(false),tunnelId:z.string(),
   proxy:z.string().description('HTTP(S) 出站代理，或 env:变量名；Tunnel、挑战及签名回报共用。'),
@@ -52,6 +52,9 @@ async function start(ctx,config,stored,publish,setStage){
   const home=ctx.profileContext?.dir;if(!home)throw Error('Web profile directory unavailable');
   setStage('model-selection');
   if(typeof ctx.sessionController?.resolveAgent!=='function'||typeof ctx.llm?.listModels!=='function'||typeof ctx.llm?.resolveCallConfig!=='function'||typeof ctx.sessions?.flush!=='function')throw Error('DSH session model selection API unavailable');
+  setStage('agent-presets');
+  const presets=ctx.agentPresets;
+  if(typeof presets?.list!=='function'||typeof presets.defaultId!=='string'||typeof presets.presetForSession!=='function'||typeof presets.composedPreset!=='function'||typeof ctx.sessionController?.create!=='function')throw Error('DSH session agent preset API unavailable');
   setStage('storage');
   const tmp=await mkdtemp(join(tmpdir(),'dsh-work-'));const db=new Store(join(home,'work-connector'));
   // Scope persisted tasks to this private tunnel, never to caller-supplied identity.

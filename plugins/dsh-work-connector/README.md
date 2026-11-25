@@ -31,7 +31,9 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 
 `workspaces` 返回已授权且仍注册的工作区，每项含 `workspaceId`、`title` 和 `workspacePath`。调用 `dispatch` 时，在 `workspaceId` 和 `workspacePath` 中只填一项。按目录派发时，请使用 DSH 主机上的绝对工作区根目录（从 `workspaces` 复制 `workspacePath`）。连接器规范化路径后精确匹配，不从子目录向上寻找；如果没有匹配项或有多个匹配项，不会创建会话。有多个匹配项时请改用 `workspaceId`。同一个工作区可以在重试时换用等价的 ID 或目录，返回的仍是原任务和会话。
 
-新任务可以在 `dispatch` 中传入可选的 `model` 对象，例如：
+先用只读工具 `presets` 查看 DSH 当前可用的 Agent 预设。每项包含预设 ID（`id`）、显示名称（`name`）和当前默认标记（`isDefault`），也包括可用的自定义预设。内置预设使用 `standard`（Standard）、`cordis`（Creator）、`ptc`（PTC）和 `minimal`（Minimal）作为 ID，以列表实际返回为准。
+
+可以在 `dispatch` 中用可选的 `agentPreset` 和 `model` 为新会话指定预设和模型，例如：
 
 ```json
 {
@@ -39,11 +41,14 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
   "goal": "只读检查工作区的项目结构",
   "acceptance": "简述目录用途，不修改文件",
   "idempotencyKey": "inspect-project-001",
+  "agentPreset": "standard",
   "model": { "provider": "deepseek-account", "model": "deepseek-v4-pro" }
 }
 ```
 
-请将 `provider` 和内层 `model` 换成当前 DSH 模型列表中的提供方 ID 和模型 ID。所选模型从第一条指令起在该会话生效，不改变 profile 默认模型；省略 `model` 则沿用默认模型。`continue_task` 继续使用原会话的当前模型，不接受 `model` 参数。指定模型未通过可用性检查时，`dispatch` 返回 `failed`，可能留下一个空会话，但不会提交指令或改用默认模型。修正模型后请用新的 `idempotencyKey` 派发。
+`agentPreset` 填 `presets` 返回的 ID，不填则由 DSH 在创建会话时使用当前默认预设。`provider` 和内层 `model` 填 DSH 模型列表中的提供方 ID 和模型 ID，不填 `model` 则沿用默认模型。预设在创建会话时绑定，模型在首条指令入队前设置；两者都不改变 profile 默认值。`continue_task` 沿用原会话，不接收 `agentPreset` 或 `model`。
+
+`dispatch`、`status` 和 `dsh.task.updated` 的 `agentPreset` 表示 DSH 已确认的实际预设；旧任务可能没有这个字段。指定预设不存在、不可用、未获 DSH 确认或实际预设不符，或指定模型无法使用时，`dispatch` 返回 `failed`，可能留下一个空会话，但不会提交指令或回退到默认设置。修正参数后请用新的 `idempotencyKey` 派发。
 
 `completed` 表示 Agent 明确报告完成，不代替用户验收；只有轮次结束时返回 `turn_returned`。审批和追问在 DSH 面板处理。人工指令与派发指令进入同一轮时，可能显示 `review_required`，避免把后续聊天结果归给原任务。
 
