@@ -47,8 +47,9 @@ const host=(records=new Map([['w',{title:'Workspace',path:process.cwd()}]]))=>{
     },
   };
 };
-async function client(t,tasks){
-  const server=endpoint({hop:'local-secret',owner:'tunnel:personal',tasks});
+const personal='tunnel:personal';
+async function client(t,tasks,events){
+  const server=endpoint({hop:'local-secret',owner:personal,tasks,events});
   server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>server.close());
   const url=`http://127.0.0.1:${server.address().port}/mcp`;
   const headers={'X-DSH-Tunnel':'local-secret'};
@@ -67,6 +68,136 @@ function workspaceFixture(t,records,allowed){
   return {dir,db,h,tasks:new Tasks(h,db,allowed)};
 }
 function append(log,type,data){log.push({seq:log.length,type,data,time:Date.now()});}
+const webhook=(filter={},url='https://cb.example/connection')=>({
+  name:'dsh.task.updated',arguments:filter,delivery:{mode:'webhook',url,secret:'whsec_'+Buffer.alloc(32,7).toString('base64')},
+});
+const verified=data=>({status:200,text:JSON.stringify({challenge:data.challenge})});
+async function complete(tasks,h,task,owner=personal){
+  const log=h.history.get(task.sessionId),row=tasks.own(owner,task.taskId);
+  const turn=1+log.filter(e=>e.type==='turn/start').length;
+  append(log,'turn/start',{turn});
+  append(log,'user/message',{source:{kind:'user',rpcId:row.requestId}});
+  append(log,'assistant/message',{turn,message:{content:[{type:'text',text:'result\nDSH_WORK_STATUS=completed'}]}});
+  append(log,'turn/end',{turn,reason:{kind:'completed'}});
+  await tasks.refresh(row);
+}
+
+test('连接级订阅验证后覆盖新派发和续办，跨任务游标在重启、重试及刷新后保持',async t=>{
+  const dir=fresh(),h=host();let db=new Store(dir),tasks=new Tasks(h,db,['w']);t.after(()=>db.close());
+  const deliveries=[];let deny=true,verifyOK=false;
+  const send=async(s,id,data)=>{
+    if(data.type==='verification')return verifyOK?verified(data):{status:200,text:'{"challenge":"wrong"}'};
+    deliveries.push({subscription:s.id,id,data});return {status:deny?503:204};
+  };
+  let events=new Events(db,tasks,send,personal);
+  const {rpc,call,rawCall}=await client(t,tasks,events);
+  const rpcResult=async(method,params)=>(await rpc(method,params)).json();
+  const {result:catalog}=await rpcResult('events/list');
+  assert.deepEqual(catalog.events[0].inputSchema.required,[]);
+  for(const invalid of [null,[],{taskId:null},{workspaceId:'w'}]){
+    assert.equal((await rpcResult('events/subscribe',{...webhook(),arguments:invalid})).error.code,-32602);
+  }
+  const oldDone=await call('dispatch',{...args,idempotencyKey:'old-done'});
+  const oldQueued=await call('dispatch',{...args,idempotencyKey:'old-queued'});
+  await complete(tasks,h,oldDone);
+  assert.equal((await rpcResult('events/subscribe',webhook())).error.code,-32015);
+  assert.equal(db.all('sub').length,0);
+  verifyOK=true;
+  const {result:sub}=await rpcResult('events/subscribe',webhook());
+  await complete(tasks,h,oldQueued);
+  const first=await call('dispatch',args);
+  assert.deepEqual(await call('dispatch',{...args,notify:true}),first);
+  assert.ok((await rawCall('dispatch',{...args,notify:false})).error);
+  await complete(tasks,h,first);
+  const next=await call('continue_task',{taskId:first.taskId,instruction:'follow-up',idempotencyKey:'next'});
+  assert.equal(next.sessionId,first.sessionId);assert.notEqual(next.taskId,first.taskId);
+  await complete(tasks,h,next);
+  assert.deepEqual(events.deliveryHealth(),{pending:1,retrying:0,halted:0});
+  await events.drain();
+  assert.equal(deliveries.length,1);assert.equal(deliveries[0].data.data.taskId,first.taskId);
+  assert.deepEqual(events.deliveryHealth(),{pending:1,retrying:1,halted:0});
+  db.close();db=new Store(dir);tasks=new Tasks(h,db,['w']);events=new Events(db,tasks,send,personal);
+  await events.drain();assert.equal(deliveries.length,1);
+  const {result:renewed}=await (await (await client(t,tasks,events)).rpc('events/subscribe',{...webhook(),cursor:sub.cursor})).json();
+  assert.equal(renewed.id,sub.id);
+  deny=false;
+  await events.drain();await events.drain();await events.drain();
+  assert.equal(deliveries.length,3);assert.deepEqual(deliveries[0],deliveries[1]);
+  assert.ok(Number(deliveries[2].data.cursor)>Number(deliveries[1].data.cursor));
+  assert.deepEqual(deliveries.slice(1).map(e=>[e.subscription,e.data.data.taskId,e.data.data.status,e.data.data.summary]),[
+    [sub.id,first.taskId,'completed','result'],[sub.id,next.taskId,'completed','result'],
+  ]);
+  assert.deepEqual(events.deliveryHealth(),{pending:0,retrying:0,halted:0});
+});
+
+test('默认通知受 Tunnel、授权工作区、单任务静音和整条订阅取消约束',async t=>{
+  const rows=new Map(['w','removed','added'].map(id=>[id,{title:id,path:process.cwd()}]));
+  const {db,h,tasks}=workspaceFixture(t,rows,['w','removed']);
+  const deliveries=[];
+  const events=new Events(db,tasks,async(s,id,data)=>{
+    if(data.type==='verification')return verified(data);
+    deliveries.push({url:s.url,taskId:data.data.taskId});return {status:204};
+  },personal);
+  const {rpc,call,rawCall}=await client(t,tasks,events);
+  const eventRpc=async(method,p)=>(await rpc(method,p)).json();
+  const existing=await call('dispatch',{...args,idempotencyKey:'existing'});
+  const legacy=webhook({taskId:existing.taskId},'https://cb.example/legacy');
+  await eventRpc('events/subscribe',legacy);
+  await eventRpc('events/subscribe',webhook());
+  await complete(tasks,h,existing);
+  const removed=await call('dispatch',{...args,workspaceId:'removed',idempotencyKey:'removed'});
+  await complete(tasks,h,removed);
+  tasks.allowed=['w','added'];
+  const added=await call('dispatch',{...args,workspaceId:'added',idempotencyKey:'added'});
+  await complete(tasks,h,added);
+  const foreign=await tasks.submit('tunnel:other',{...args,idempotencyKey:'foreign'});
+  await complete(tasks,h,foreign,'tunnel:other');
+  assert.equal((await eventRpc('events/subscribe',webhook({taskId:foreign.taskId}))).error.code,-32602);
+  assert.ok((await rawCall('mute_task_notifications',{taskId:foreign.taskId})).error);
+  assert.ok((await rawCall('dispatch',{...args,notify:'false'})).error);
+  const optedOut=await call('dispatch',{...args,idempotencyKey:'no-notify',notify:false});
+  await complete(tasks,h,optedOut);
+  const muted=await call('dispatch',{...args,idempotencyKey:'mute-later'});
+  await complete(tasks,h,muted);
+  await call('mute_task_notifications',{taskId:muted.taskId});
+  assert.deepEqual(await call('mute_task_notifications',{taskId:muted.taskId}),{taskId:muted.taskId,muted:true});
+  assert.equal((await call('status',{taskId:muted.taskId})).status,'completed');
+  const followUp=await call('continue_task',{taskId:muted.taskId,instruction:'follow-up',idempotencyKey:'follow-up'});
+  await complete(tasks,h,followUp);
+  await events.drain();await events.drain();
+  assert.deepEqual(deliveries,[
+    {url:legacy.delivery.url,taskId:existing.taskId},{url:webhook().delivery.url,taskId:followUp.taskId},
+  ]);
+  const pending=await call('dispatch',{...args,idempotencyKey:'pending'});
+  await complete(tasks,h,pending);
+  assert.deepEqual((await eventRpc('events/unsubscribe',webhook())).result,{});
+  await events.drain();
+  assert.equal(deliveries.length,2);
+  assert.equal(db.all('sub').length,1);
+  await eventRpc('events/subscribe',webhook());
+  await events.drain();
+  assert.equal(deliveries.length,2);
+});
+
+test('取消连接级订阅不会被尚未返回的回调验证重新启用',async t=>{
+  const {db,tasks}=workspaceFixture(t,new Map([['w',{title:'w',path:process.cwd()}]]),['w']);
+  const entered=Promise.withResolvers(),resume=Promise.withResolvers();
+  let hold=false;
+  const events=new Events(db,tasks,async(s,id,data)=>{
+    if(hold){entered.resolve();await resume.promise;}
+    return verified(data);
+  },personal);
+  await events.subscription(personal,webhook());
+  hold=true;
+  const refreshing=events.subscription(personal,webhook());
+  const rejected=assert.rejects(refreshing,/changed while verifying/);
+  await entered.promise;
+  await events.subscription(personal,webhook(),true);
+  resume.resolve();
+  await rejected;
+  assert.deepEqual(db.all('sub'),[]);
+});
+
 test('并发重试只创建一次，快任务先于订阅、重启后重发同一事件，手工续办不重复回报',async()=>{
   const dir=fresh(),h=host();let db=new Store(dir),tasks=new Tasks(h,db,['w']);
   const [task,retry]=await Promise.all([tasks.submit('u',args),tasks.submit('u',args)]);assert.deepEqual(task,retry);assert.equal(h.made,1);assert.equal(h.prompts.length,1);

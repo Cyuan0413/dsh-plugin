@@ -27,7 +27,7 @@ const builtInPresetNames=new Map([['standard','Standard'],['cordis','Creator'],[
 export function publicTask(t) {return {taskId:t.id,sessionId:t.sessionId,workspaceId:t.workspaceId,...(t.agentPreset?{agentPreset:t.agentPreset}:{}),status:t.status,summary:t.summary||'',...(t.pending?.length?{pendingInput:t.pending}:{})};}
 export function change(db,t,status,summary,time=Date.now(),terminal=false) {
   Object.assign(t,{status,summary,terminal});
-  const e={id:randomUUID(),taskId:t.id,n:++t.revision,name:eventName,timestamp:new Date(time).toISOString(),data:publicTask(t)};
+  const e={id:randomUUID(),taskId:t.id,n:++t.revision,order:db.nextOrder(),name:eventName,timestamp:new Date(time).toISOString(),data:publicTask(t)};
   db.put('event',e);db.put('task',t);
 }
 export function fold(db,t,e) {
@@ -79,6 +79,12 @@ export class Tasks {
     return rows.filter(row=>row.broken===undefined).map(({id,name})=>({id,name:name?.trim()?name:builtInPresetNames.get(id)??id,isDefault:id===defaultId}));
   }
   own(owner,id){const t=this.db.get('task',text(id,128));if(!t||t.owner!==owner||!this.allowed.includes(t.workspaceId))throw Error('Task unavailable');return t;}
+  muteNotifications(owner,id){
+    const t=this.own(owner,id);
+    // A separate record cannot be overwritten by admission resuming after an await.
+    this.db.put('mute',{id:t.id});
+    return {taskId:t.id,muted:true};
+  }
   workspaces(){
     return [...new Set(this.allowed)].flatMap(workspaceId=>{
       const workspace=this.registry.get(workspaceId);
@@ -107,21 +113,28 @@ export class Tasks {
     const instruction=parent?text(a.instruction):[text(a.goal),`上下文：${a.context===undefined?'无':text(a.context)}`,`验收标准：${text(a.acceptance)}`].join('\n\n');
     const requestedAgentPreset=parent?undefined:parseAgentPreset(a.agentPreset);
     const model=parent?undefined:parseModelSelection(a.model);
+    if(a.notify!==undefined&&typeof a.notify!=='boolean')throw Error('notify must be boolean');
+    const muted=a.notify===false;
     const id=digest(JSON.stringify([owner,text(a.idempotencyKey,128)]));
-    // Preserve both legacy fingerprints (with or without an explicit model).
-    const fingerprint=digest(JSON.stringify([workspaceId,parent?.id,instruction,...(model?[model]:[]),...(requestedAgentPreset===undefined?[]:[{agentPreset:requestedAgentPreset}])]));
+    // The default keeps existing idempotency keys compatible.
+    const fingerprint=digest(JSON.stringify([workspaceId,parent?.id,instruction,...(model?[model]:[]),...(requestedAgentPreset===undefined?[]:[{agentPreset:requestedAgentPreset}]),...(muted?[{notify:false}]:[])]));
     const t=this.db.get('task',id);
     if(t&&t.fingerprint!==fingerprint)throw Error('Idempotency key already used for different input');
     if(this.locks.has(id))return this.locks.get(id);
     if(t && !['creating','submitting'].includes(t.status))return publicTask(t);
-    const promise=this.admit(t??{id,fingerprint,owner,workspaceId,sessionId:parent?.sessionId??randomUUID(),requestId:randomUUID(),revision:0,status:parent?'submitting':'creating',cursor:-1,...(model?{model}:{}),...(requestedAgentPreset===undefined?{}:{requestedAgentPreset})},instruction,Boolean(t));
+    const promise=this.admit(t??{id,fingerprint,owner,workspaceId,sessionId:parent?.sessionId??randomUUID(),requestId:randomUUID(),revision:0,status:parent?'submitting':'creating',cursor:-1,...(model?{model}:{}),...(requestedAgentPreset===undefined?{}:{requestedAgentPreset})},instruction,Boolean(t),muted);
     this.locks.set(id,promise);try{return await promise;}finally{this.locks.delete(id);}
   }
   finishAdmission(t,status,summary){
     delete t.instruction;this.db.transaction(()=>change(this.db,t,status,summary,Date.now(),true));return publicTask(t);
   }
-  async admit(t,instruction,recovering){
-    const db=this.db;t.instruction=instruction;db.put('task',t);
+  async admit(t,instruction,recovering,muted=false){
+    const db=this.db;t.instruction=instruction;
+    if(recovering)db.put('task',t);
+    else db.transaction(()=>{
+      t.createdOrder=db.nextOrder();db.put('task',t);
+      if(muted)db.put('mute',{id:t.id});
+    });
     const wanted=t.requestedAgentPreset;let actual;
     if(t.status==='creating'&&!recovering){
       try{

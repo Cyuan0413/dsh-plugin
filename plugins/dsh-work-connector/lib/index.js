@@ -78,7 +78,7 @@ async function start(ctx,config,stored,publish,setStage){
       child.once('close',()=>{child=undefined;if(stopping)return;ctx.logger.warn('Work tunnel stopped; reconnecting');delay=Date.now()-started>60000?1000:Math.min(delay*2,60000);restart=setTimeout(launch,delay);});
     };setStage('launch');launch();
     const tick=()=>{if(stopping||pump)return;pump=(async()=>{for(const t of db.all('task')){if(stopping)break;if(!t.terminal&&t.owner===owner&&config.workspaceIds.includes(t.workspaceId)){try{await tasks.refresh(t);}catch{ctx.logger.warn('Work task state temporarily unavailable');}}}if(!stopping)await events.drain();})().catch(()=>ctx.logger.warn('Work connector reconciliation failed')).finally(()=>{pump=undefined;});};
-    publish(async()=>{const subs=db.all('sub').filter(s=>s.owner===owner&&s.expiry>Date.now());const pending=subs.filter(s=>(db.get('task',s.taskId)?.revision??0)>s.cursor);return {tunnel:await tunnelReady(join(tmp,'health.sock'))?'ready':'not_ready',pending:pending.length,retrying:pending.filter(s=>s.attempts&&!s.halted).length,halted:pending.filter(s=>s.halted).length};});
+    publish(async()=>({tunnel:await tunnelReady(join(tmp,'health.sock'))?'ready':'not_ready',...events.deliveryHealth()}));
     timer=setInterval(tick,2000);tick();ctx.effect(()=>stop,'work connector lifecycle');
   }catch(e){await stop();throw e;}
 }

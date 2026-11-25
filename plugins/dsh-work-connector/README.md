@@ -15,7 +15,7 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 安装后默认不联网。面板所有者打开「设置 → Work 连接器」即可填写全部连接参数，不必编辑 profile 或设置进程环境变量。
 
 1. **连接设置**：填写 OpenAI Platform 上关联了目标 ChatGPT 工作区的 Tunnel ID 和运行密钥（Tunnel Read + Use，不使用管理密钥）。填写 HTTP(S) 出站代理，然后勾选允许派发的现有 Workspace。Tunnel 控制面、订阅验证和签名回报共用该代理；缺少代理不会启动，连接失败不回退直连。
-2. **事件回报**：不用填写回调地址。ChatGPT 在订阅任务时提供地址和签名密钥；连接器先发送签名挑战，收到正确响应后才投递该任务的结果。验证和投递只连接经检查的公网 IPv4，不跟随重定向；代理须允许向目标 IP 的 443 端口 CONNECT。
+2. **事件回报**：不用填写回调地址。ChatGPT 提供回调地址和签名密钥；连接器收到正确的签名挑战响应后才开始投递。验证和投递只连接经检查的公网 IPv4，不跟随重定向；代理须允许向目标 IP 的 443 端口 CONNECT。
 3. **保存配置**只保存草稿，不建立网络连接。确认后单独点**启用连接**，再刷新运行状态。运行时要改参数，先点**停用连接**；这不会中止已受理的 DSH 任务。
 4. 在 ChatGPT 添加自定义 MCP 服务，连接方式选 **Tunnel**，选择目标 Tunnel，认证方式选 **No authentication（无认证）**。见 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) 和 [MCP Events](https://developers.openai.com/plugins/build/mcp-events)。
 
@@ -27,7 +27,13 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 
 ## 在 Work 中使用
 
-例如：「列出我可以使用的工作区。在指定工作区做一项只读检查，返回会话 ID；订阅这次任务，完成或需要我介入时在这条对话告诉我。」`dispatch` 返回任务 ID 和会话 ID；`queued` 只表示指令已入队。`status` 查询任务，`continue_task` 在原会话排队。写入重试须使用相同的 `idempotencyKey` 和请求内容。每个新任务要按返回的 `taskId` 订阅 `dsh.task.updated`。
+首次使用或升级后，先在 ChatGPT 插件页重新扫描 MCP 服务。在希望接收通知的 Work 对话里说：「订阅 `dsh.task.updated`，不加 `taskId` 筛选；以后通过这条连接派发的 DSH 任务完成、失败或需要我介入时，在这条对话告诉我。」ChatGPT 以空的 `arguments: {}` 建立连接级订阅。
+
+- 订阅激活后，同一 Tunnel 在授权工作区新派发及续办的任务默认回报，无需逐个订阅。通知带各自的 `taskId`、状态和摘要；已有任务、面板手工会话和其他 Tunnel 不在范围内。投递也会检查当前工作区授权；如需把后来加入白名单的工作区纳入通知，取消后重新订阅。
+- 只关注单个任务时，可用 `{ "taskId": "…" }` 订阅。升级不会扩大已有单任务订阅；同一对话若已启用连接级订阅，无需再为新任务另建单任务订阅。
+- 某个任务不需要通知时，派发或续办时传 `notify: false`，或事后调用 `mute_task_notifications(taskId)` 停止发送该任务尚未发出的通知。静音不影响任务执行、状态查询或后续派发。停止在该 Work 对话接收整个连接的通知，请取消该连接级订阅。
+
+`dispatch` 返回任务 ID 和会话 ID；`queued` 只表示指令已入队。`status` 查询任务，`continue_task` 在原会话排队，但会返回新的任务 ID。写入重试须使用相同的 `idempotencyKey` 和请求内容。
 
 `workspaces` 返回已授权且仍注册的工作区，每项含 `workspaceId`、`title` 和 `workspacePath`。调用 `dispatch` 时，在 `workspaceId` 和 `workspacePath` 中只填一项。按目录派发时，请使用 DSH 主机上的绝对工作区根目录（从 `workspaces` 复制 `workspacePath`）。连接器规范化路径后精确匹配，不从子目录向上寻找；如果没有匹配项或有多个匹配项，不会创建会话。有多个匹配项时请改用 `workspaceId`。同一个工作区可以在重试时换用等价的 ID 或目录，返回的仍是原任务和会话。
 
@@ -55,7 +61,7 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 ## 排障与数据
 
 - **隧道未就绪**：检查 Tunnel 绑定、运行凭据、代理连通性。设置页「刷新」重新读取官方运行时的就绪状态。不要以仅有子进程作为连通依据。
-- **能派活、收不到回报**：确认原 Work 对话已经订阅正确的任务、验证挑战通过，检查回调域名能否解析到公网 IPv4，以及代理是否允许 CONNECT。设置页将待送、重试和停止投递的订阅分开显示。连续失败达到重试上限、HTTP 410 或 413 会停止该订阅的投递；排除原因后重新订阅。
+- **能派活、收不到回报**：确认接收通知的 Work 对话已验证订阅，且任务在订阅范围内、未静音；连接级订阅只覆盖订阅激活后派发的任务。检查回调域名能否解析到公网 IPv4，以及代理是否允许 CONNECT。设置页将待送、重试和停止投递的订阅分开显示。连续失败达到重试上限、HTTP 410 或 413 会停止该订阅的投递；排除原因后刷新订阅。
 - **重启与数据保护**：任务归属、派发请求 ID、待投事件、订阅回调 URL 和签名密钥保存在当前 profile 的私有 `work-connector` 目录中。文件权限不是加密；不要共享或上传数据库。事件采用至少一次投递，重试保留事件 ID。启用前请按自身留存要求管理这份数据。
 
 安装与离线代理验证不代表真实 Work 会话已接收回报。实际验收应从一条 Work 对话派发短任务，在原 DSH 面板看到它，并在该对话中收到匹配回报。
