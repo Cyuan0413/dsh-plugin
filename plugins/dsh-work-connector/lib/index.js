@@ -16,7 +16,7 @@ import {endpoint} from './mcp.js';
 import {healthRoute,tunnelReady} from './health.js';
 
 export const name='work-connector';
-export const inject=['sessionController','workspaceRegistry','webServer'];
+export const inject=['sessionController','workspaceRegistry','webServer','connection'];
 export const Config=z.object({
   enabled:z.boolean().default(false),tunnelId:z.string(),
   proxy:z.string().description('HTTP(S) 出站代理，或 env:变量名；Tunnel、挑战及签名回报共用。'),
