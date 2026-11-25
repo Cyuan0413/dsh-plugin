@@ -1,0 +1,30 @@
+name: Usage statistics
+on:
+  pull_request:
+    paths:
+      - 'plugins/dsh-plugin-stats/**'
+      - '.github/workflows/stats.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/dsh-plugin-stats
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: plugins/dsh-plugin-stats/package.json
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Verify bundled files are up to date
+        run: test -z "$(git status --porcelain -- lib)"
+      - run: pnpm test:bundle
+      - run: npm pack --dry-run

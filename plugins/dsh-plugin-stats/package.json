@@ -1,0 +1,50 @@
+{
+  "name": "dsh-plugin-stats",
+  "version": "0.1.1-model-speed.1",
+  "description": "Usage, model speed, cost, and tool statistics for DeepSeek Harness Web",
+  "license": "MIT",
+  "author": "Huakun Shen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Xinglei-dev/dsh-plugin.git",
+    "directory": "plugins/dsh-plugin-stats"
+  },
+  "type": "module",
+  "packageManager": "pnpm@10.0.0",
+  "engines": { "node": "^22.19.0 || >=24.0.0", "dsh": ">=0.2.2-rc.5 <0.3.0-0" },
+  "main": "./lib/host.mjs",
+  "exports": {
+    ".": "./lib/host.mjs",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "bin": { "dsh-stats": "./lib/cli.js" },
+  "files": ["lib/", "locale/", "docs/", "icon.svg", "cordis.patch.yml", "LICENSE", "THIRD-PARTY-LICENSES.txt", "README.md"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:bundle": "node --test test/bundle-smoke.mjs",
+    "recompute": "tsx src/cli.ts recompute",
+    "export-csv": "tsx src/cli.ts export",
+    "update-pricing": "tsx scripts/update-pricing.ts"
+  },
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "@types/node": "^26.6.4",
+    "happy-dom": "20.14.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tsdown": "^0.23.0",
+    "tsx": "^4.21.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.0.18",
+    "zod": "^4.6.5"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web", "immediately": true, "inject": [] }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Usage statistics",
+    "description": "Compare model speed, token usage, and cost by provider and model, and track tool calls and session activity."
+  }
+}
