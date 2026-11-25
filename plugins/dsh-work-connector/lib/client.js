@@ -1,0 +1,7 @@
+window.__ModuleLoader__.load({id:'dsh-work-connector',factory:require=>{
+  const R=require('react'),h=R.createElement;
+  return {inject:['slots','locale'],apply(ctx){const ns='work-connector';ctx.effect(()=>ctx.locale.register(ns,{zh:{title:'Work 连接器',loading:'读取状态…',fail:'无法读取状态，请确认拥有面板访问权限。',disabled:'未启用',ready:'就绪',not_ready:'未就绪',tunnel:'隧道',pending:'待送订阅',retrying:'重试中',halted:'投递已停止',refresh:'刷新'},en:{title:'Work connector',loading:'Loading…',fail:'Status unavailable. Owner access is required.',disabled:'Disabled',ready:'Ready',not_ready:'Not ready',tunnel:'Tunnel',pending:'Pending subscriptions',retrying:'Retrying',halted:'Delivery stopped',refresh:'Refresh'}}));const t=ctx.locale.bind(ns);
+    function Page(){const [v,set]=R.useState(null),[n,reload]=R.useState(0);R.useEffect(()=>{const c=new AbortController();fetch('/work-connector/health',{signal:c.signal,cache:'no-store'}).then(r=>{if(!r.ok)throw Error();return r.json();}).then(x=>{if(!c.signal.aborted)set(x);}).catch(()=>{if(!c.signal.aborted)set(false);});return ()=>c.abort();},[n]);return h('section',null,h('h3',null,t('title')),v?h('dl',null,...['tunnel','pending','retrying','halted'].flatMap(k=>[h('dt',{key:k},t(k)),h('dd',{key:k+'v'},k==='tunnel'?t(v[k]):v[k])])):h('p',null,t(v===null?'loading':'fail')),h('button',{type:'button',onClick:()=>reload(n+1)},t('refresh')));}
+    ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'work-connector',order:32,label:()=>t('title')},Page));
+  }};
+}});
