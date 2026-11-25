@@ -19,6 +19,8 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 3. **保存配置**只保存草稿，不建立网络连接。确认后单独点**启用连接**，再刷新运行状态。运行时要改参数，先点**停用连接**；这不会中止已受理的 DSH 任务。
 4. 在 ChatGPT 添加自定义 MCP 服务，连接方式选 **Tunnel**，选择目标 Tunnel 并配置 OAuth。见 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) 和 [MCP Events](https://developers.openai.com/plugins/build/mcp-events)。
 
+**代理用户名和密码（Basic 认证）**：在「出站代理」直接填写 `https://用户名:密码@代理主机:端口`。只对用户名和密码分别做 URL 百分号编码，不编码整个地址。例如虚构密码 `p@ss:word` 应写成 `p%40ss%3Aword`。代理提供 TLS 时优先用 `https://`；使用 `http://` 时，到代理这一段不会加密 Basic 凭据。代理凭据用于 CONNECT，不作为签名回报的请求头发给回调服务。
+
 运行密钥和代理地址只写入 DSH 凭据存储，不回显。再次保存时留空会保留原值，勾选「清除已存值」才会清除。不要在聊天、日志或截图中提供凭据；只在受信任的 HTTPS 面板或本机回环上配置。已有 profile 的代理、`DSH_WORK_TUNNEL_KEY`、`jwksFile` 可继续使用；在界面替换或清除相应字段后，以新设置为准。
 
 允许的用户共享配置中的 Workspace 白名单，但查询、续办和订阅按派发者隔离。只将工作区授权给受信任的操作者：该白名单限制派发位置，不会降低 DSH Agent 本身的工具权限。
