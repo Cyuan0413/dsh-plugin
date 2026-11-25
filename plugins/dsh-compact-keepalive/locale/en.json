@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Keep manual compaction running",
+    "description": "An accepted Web /compact keeps running if the initiating page reloads or disconnects. Reopen the session to see the outcome."
+  }
+}
