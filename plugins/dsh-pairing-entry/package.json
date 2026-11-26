@@ -1,7 +1,7 @@
 {
   "name": "dsh-pairing-entry",
   "version": "0.1.0",
-  "description": "Bookmarkable DSH Web entry: /entry/<key> redirects to the current launch token, and the key is set in Web Settings",
+  "description": "Bookmarkable DSH Web entry: /entry/<key> redirects to the current launch token, and the key is set on the Plugins page",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",

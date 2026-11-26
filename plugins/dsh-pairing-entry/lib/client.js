@@ -6,8 +6,8 @@ window.__ModuleLoader__.load({
     /** Locale namespace this plugin owns. */
     const NS = 'pairing-entry';
 
-    /** Host loader entry id, which is also the Settings namespace this form edits. */
-    const ENTRY_ID = 'pairing-entry';
+    /** Row config slot key: `<package name>#<row id>`. */
+    const ROW_KEY = 'dsh-pairing-entry#pairing-entry';
 
     /** Minimum key length, mirroring the Host's validation. */
     const MIN_KEY_LENGTH = 32;
@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
     const KEY_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
     const zh = {
-      tab: '配对入口',
+      summary: '收藏一个固定入口地址，用来换取当前启动 token',
       intro: '收藏这个入口地址，它会把浏览器带到当前进程的启动 token 上。密钥保存后立即生效，修改后旧的收藏地址失效。',
       label: '入口密钥',
       placeholder: '至少 32 个字符，只用 A-Z、a-z、0-9、- 和 _',
@@ -43,7 +43,7 @@ window.__ModuleLoader__.load({
     };
 
     const en = {
-      tab: 'Pairing entry',
+      summary: 'Bookmark a fixed entry address that reaches the current launch token',
       intro: 'Bookmark this entry address: it takes the browser to the current process launch token. A saved key applies immediately; changing it invalidates the old bookmark.',
       label: 'Entry key',
       placeholder: 'At least 32 characters from A-Z, a-z, 0-9, - and _',
@@ -117,20 +117,6 @@ window.__ModuleLoader__.load({
     };
 
     /**
-     * Follow one settings form's snapshot.
-     * @param form - `configForms` controller for the Host entry.
-     * @returns the latest snapshot; re-rendered after every change.
-     */
-    function useFormSnapshot(form) {
-      const [snapshot, setSnapshot] = react.useState(() => form.getSnapshot());
-      react.useEffect(() => {
-        setSnapshot(form.getSnapshot());
-        return form.subscribe(() => setSnapshot(form.getSnapshot()));
-      }, [form]);
-      return snapshot;
-    }
-
-    /**
      * Report what is wrong with a candidate key.
      * @param value - current input value.
      * @returns the locale key naming the problem, or `undefined` when usable.
@@ -167,18 +153,20 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The Plugins settings tab that edits the entry key.
-     * @param props - injected form controller and the slot's locale translator.
-     * @returns the tab body.
+     * The Plugins page row config that edits the entry key.
+     * @param props - the page host's `view` and form, and the slot's locale translator.
+     * @returns the row summary or the config form.
      */
-    function PairingEntrySettingsTab({ form, t }) {
-      const snapshot = useFormSnapshot(form);
+    function PairingEntrySettingsTab({ view, form, t }) {
       const [draft, setDraft] = react.useState(null);
       const [busy, setBusy] = react.useState(false);
       const [notice, setNotice] = react.useState('');
       const [copied, setCopied] = react.useState(false);
       const inputId = react.useId();
 
+      if (view === 'summary') return t('summary');
+      if (form === undefined) return react.createElement('p', { style: STYLE_HINT }, t('unavailable'));
+      const snapshot = form.state;
       if (snapshot.status === 'loading') return react.createElement('p', { style: STYLE_HINT }, t('loading'));
       if (snapshot.status === 'unavailable') return react.createElement('p', { style: STYLE_HINT }, t('unavailable'));
 
@@ -196,7 +184,7 @@ window.__ModuleLoader__.load({
         setNotice('');
         let saved = false;
         try {
-          saved = await form.set('key', candidate);
+          saved = (await form.mutate([{ op: 'set', path: ['key'], value: candidate }], snapshot.revision)) === true;
         } catch (_error) {
           saved = false;
         }
@@ -211,7 +199,7 @@ window.__ModuleLoader__.load({
         setNotice('');
         let cleared = false;
         try {
-          cleared = await form.unset('key');
+          cleared = (await form.mutate([{ op: 'unset', path: ['key'] }], snapshot.revision)) === true;
         } catch (_error) {
           cleared = false;
         }
@@ -297,24 +285,19 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** Services the tab needs: slot registration, locale copy, and the settings form. */
-    const inject = ['slots', 'locale', 'configForms'];
+    /** Services the row config needs: slot registration and locale copy. */
+    const inject = ['slots', 'locale'];
 
     /**
-     * Register the Plugins settings tab.
+     * Register the Plugins page row config.
      * @param ctx - the client plugin context.
      */
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), `${NS}: dictionaries`);
-      const t = ctx.locale.bind(NS);
-      const form = ctx.configForms.get(ENTRY_ID);
-      ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
-        name: 'settings.plugins.tab',
-        id: ENTRY_ID,
-        order: 100,
-        label: () => t('tab'),
+      ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
+        name: 'plugins.row.config',
+        key: ROW_KEY,
         locale: NS,
-        inject: () => ({ form }),
       }, PairingEntrySettingsTab));
     }
 

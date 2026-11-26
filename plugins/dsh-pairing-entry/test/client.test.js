@@ -129,14 +129,9 @@ function fakeForm(snapshot) {
   const writes = [];
   return {
     writes,
-    getSnapshot: () => snapshot,
-    subscribe: () => () => {},
-    async set(field, value) {
-      writes.push({ op: 'set', field, value });
-      return true;
-    },
-    async unset(field) {
-      writes.push({ op: 'unset', field });
+    state: snapshot,
+    async mutate(ops, revision) {
+      writes.push({ ops, revision });
       return true;
     },
   };
@@ -144,10 +139,9 @@ function fakeForm(snapshot) {
 
 /**
  * Mount the client plugin over stand-in services.
- * @param form - form controller the tab edits.
  * @returns the recorded slot registration and locale dictionaries.
  */
-function mountClient(form) {
+function mountClient() {
   react = createReactStub();
   const { exports } = materialize();
   const localeNamespaces = [];
@@ -163,12 +157,6 @@ function mountClient(form) {
       },
       bind(ns) {
         return (key, params) => (params === undefined ? `${ns}/${key}` : `${ns}/${key}(${Object.keys(params).join(',')})`);
-      },
-    },
-    configForms: {
-      get(id) {
-        assert.equal(id, 'pairing-entry');
-        return form;
       },
     },
     slots: {
@@ -199,52 +187,56 @@ describe('bundle shape', () => {
     const { exports, required, registration } = materialize();
     assert.equal(registration.id, 'dsh-pairing-entry');
     assert.deepEqual(required, ['react']);
-    assert.deepEqual(exports.inject, ['slots', 'locale', 'configForms']);
+    assert.deepEqual(exports.inject, ['slots', 'locale']);
     assert.equal(typeof exports.apply, 'function');
   });
 
   it('registers dictionaries whose key sets agree', () => {
-    const { localeNamespaces } = mountClient(fakeForm(READY));
+    const { localeNamespaces } = mountClient();
     assert.equal(localeNamespaces.length, 1);
     const [{ ns, dictionaries }] = localeNamespaces;
     assert.equal(ns, 'pairing-entry');
     assert.deepEqual(Object.keys(dictionaries.zh).sort(), Object.keys(dictionaries.en).sort());
   });
 
-  it('contributes one tab to the Plugins settings section', () => {
-    const form = fakeForm(READY);
-    const { slots } = mountClient(form);
+  it('contributes one config to the Plugins page row', () => {
+    const { slots } = mountClient();
     assert.equal(slots.length, 1);
     const [{ options, component }] = slots;
-    assert.equal(options.name, 'settings.plugins.tab');
-    assert.equal(options.id, 'pairing-entry');
-    assert.equal(typeof options.order, 'number');
+    assert.equal(options.name, 'plugins.row.config');
+    assert.equal(options.key, 'dsh-pairing-entry#pairing-entry');
     assert.equal(options.locale, 'pairing-entry');
-    assert.equal(options.label(), 'pairing-entry/tab');
+    assert.equal('inject' in options, false);
     assert.equal(typeof component, 'function');
-    assert.equal(options.inject().form, form);
   });
 });
 
 describe('tab rendering', () => {
+  it('returns the one-line summary in summary view and explains a missing form', () => {
+    const { slots } = mountClient();
+    assert.equal(render(slots[0].component, { view: 'summary', t: (key) => key }), 'summary');
+    const tree = render(slots[0].component, { view: 'page', form: undefined, t: (key) => key });
+    assert.deepEqual(texts(tree), ['unavailable']);
+  });
+
   it('shows a loading line before the Host describes the namespace', () => {
     const form = fakeForm({ status: 'loading', writable: false });
-    const { slots } = mountClient(form);
-    const tree = render(slots[0].component, { form, t: (key) => key });
+    const { slots } = mountClient();
+    const tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     assert.deepEqual(texts(tree), ['loading']);
   });
 
   it('explains an unavailable namespace', () => {
     const form = fakeForm({ status: 'unavailable', writable: false });
-    const { slots } = mountClient(form);
-    const tree = render(slots[0].component, { form, t: (key) => key });
+    const { slots } = mountClient();
+    const tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     assert.deepEqual(texts(tree), ['unavailable']);
   });
 
   it('renders the stored key, the entry address, and the random button', () => {
     const form = fakeForm(READY);
-    const { slots } = mountClient(form);
-    const tree = render(slots[0].component, { form, t: (key) => key });
+    const { slots } = mountClient();
+    const tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     assert.equal(input(tree).props.value, KEY);
     assert.equal(input(tree).props.disabled, false);
     assert.deepEqual(button(tree, 'generate') === undefined, false);
@@ -253,40 +245,60 @@ describe('tab rendering', () => {
 
   it('saves the key through the form controller', async () => {
     const form = fakeForm(READY);
-    const { slots } = mountClient(form);
-    let tree = render(slots[0].component, { form, t: (key) => key });
+    const { slots } = mountClient();
+    let tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     button(tree, 'generate').props.onClick();
-    tree = render(slots[0].component, { form, t: (key) => key });
+    tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     const generated = input(tree).props.value;
     assert.match(generated, /^[A-Za-z0-9_-]{32}$/u);
     button(tree, 'save').props.onClick();
     await Promise.resolve();
-    assert.deepEqual(form.writes, [{ op: 'set', field: 'key', value: generated }]);
+    assert.deepEqual(form.writes, [{
+      ops: [{ op: 'set', path: ['key'], value: generated }],
+      revision: READY.revision,
+    }]);
+  });
+
+  it('reports a failed save when the Host rejects the mutation', async () => {
+    const form = fakeForm(READY);
+    form.mutate = async () => false;
+    const { slots } = mountClient();
+    let tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
+    button(tree, 'generate').props.onClick();
+    tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
+    button(tree, 'save').props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+    tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
+    assert.equal(texts(tree).includes('saveFailed'), true);
   });
 
   it('clears the key and reports the empty state', async () => {
     const form = fakeForm(READY);
-    const { slots } = mountClient(form);
-    const tree = render(slots[0].component, { form, t: (key) => key });
+    const { slots } = mountClient();
+    const tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     button(tree, 'clear').props.onClick();
     await Promise.resolve();
-    assert.deepEqual(form.writes, [{ op: 'unset', field: 'key' }]);
+    assert.deepEqual(form.writes, [{
+      ops: [{ op: 'unset', path: ['key'] }],
+      revision: READY.revision,
+    }]);
   });
 
   it('keeps the save button disabled while the draft is unusable', () => {
     const form = fakeForm(READY);
-    const { slots } = mountClient(form);
-    let tree = render(slots[0].component, { form, t: (key) => key });
+    const { slots } = mountClient();
+    let tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     input(tree).props.onChange({ target: { value: 'too-short' } });
-    tree = render(slots[0].component, { form, t: (key) => key });
+    tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     assert.equal(button(tree, 'save').props.disabled, true);
     assert.equal(texts(tree).some((text) => text.includes('problemShort')), true);
   });
 
   it('shows the empty-state hint when no key is stored', () => {
     const form = fakeForm({ status: 'ready', value: {}, base: {}, user: {}, revision: 0, writable: true });
-    const { slots } = mountClient(form);
-    const tree = render(slots[0].component, { form, t: (key) => key });
+    const { slots } = mountClient();
+    const tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     assert.equal(input(tree).props.value, '');
     assert.equal(texts(tree).includes('noKey'), true);
     assert.equal(button(tree, 'clear').props.disabled, true);
@@ -294,8 +306,8 @@ describe('tab rendering', () => {
 
   it('marks the form read-only when the profile refuses writes', () => {
     const form = fakeForm({ ...READY, writable: false });
-    const { slots } = mountClient(form);
-    const tree = render(slots[0].component, { form, t: (key) => key });
+    const { slots } = mountClient();
+    const tree = render(slots[0].component, { view: 'page', form, t: (key) => key });
     assert.equal(input(tree).props.disabled, true);
     assert.equal(texts(tree).includes('readOnly'), true);
   });

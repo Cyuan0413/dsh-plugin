@@ -48,7 +48,7 @@ dsh plugin --profile web add link:/绝对路径/dsh-plugin/plugins/dsh-pairing-e
 
 ## 配置
 
-在 Web 界面里配置：**设置 → 插件 → 配对入口**，填入 key 后保存。
+在 Web 界面里配置：打开插件页，在 `dsh-pairing-entry` 这一行点「配置」，填入 key 后保存。
 
 - 保存会写进当前 profile 的 `cordis.patch.yml`（`id: pairing-entry` 的 `config.key`）。`key` 是 volatile 字段，Loader 把新值直接提交给运行中的实例，插件随即按新 key 重新注册路由，不用重启 DSH。
 - 「随机生成」按钮生成 32 个字符的 key，等价于 `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`。
@@ -92,9 +92,9 @@ key 的要求：
 
 **访问入口页返回 403。** `requestRejection` 判定 Host、Origin 或 `Sec-Fetch-Site` 不可信。经反向代理暴露时必须用 `--trusted-host` 声明外部域名（例如 `--trusted-host deepseek.xinglei.org`），并原样转发 `Host`；浏览器发出的 `Origin` 也必须和 Host 同源。
 
-**访问入口页返回 404。** 没配 key、key 不合法、或者还在用改 key 之前的旧书签。打开面板的「配对入口」页，它会显示当前存储值和问题。
+**访问入口页返回 404。** 没配 key、key 不合法、或者还在用改 key 之前的旧书签。打开插件页里 `dsh-pairing-entry` 这一行的配置，它会显示当前存储值和问题。
 
-**设置里没有「配对入口」页。** 插件条目没加载，或者 DSH 版本与随包提供的浏览器端 bundle 契约不匹配（见下方版本范围）。
+**插件页里 `dsh-pairing-entry` 这一行没有配置入口。** 插件条目没加载，或者 DSH 版本与随包提供的浏览器端 bundle 契约不匹配（见下方版本范围）。这个入口从 DSH `0.2.2-rc.3` 起才有；更早的版本只能手写 profile 的 `cordis.patch.yml`（见上文）。
 
 **保存失败。** 配置在你读取之后被别的窗口改过。面板会重新读取，确认当前值后再保存一次。
 
@@ -105,14 +105,16 @@ key 的要求：
 ## 实现与依赖
 
 - 宿主端只读公开接口：`connection.requestRejection()`、`connection.authenticatedUrl()`、`webServer.register()`。启动 token 从 `authenticatedUrl()` 拼出的地址里取，上游改变 token 的传递方式会在加载阶段报错，不会悄悄返回旧值。
-- key 用 Schemastery 的 `volatile` 字段声明。这是设置面板能读写它的前提：设置面板只展示和写入 volatile 字段。
-- 面板写入走 `settings` → `configEditor`，落到 profile patch；volatile 字段的变化由 Loader 提交到运行中的实例（不重载条目），插件监听 `loader/volatile-update` 后按新 key 重新注册路由。
-- 浏览器端是包内自带的 `lib/client.js`（`dsh.client` 声明），注册到 `settings.plugins.tab`，通过 `ctx.configForms` 读写同一个配置命名空间；只依赖 `react`。
+- key 用 Schemastery 的 `volatile` 字段声明。这是配置页能读写它的前提：只展示和写入 volatile 字段。
+- 保存落到 profile patch；volatile 字段的变化由 Loader 提交到运行中的实例（不重载条目），插件监听 `loader/volatile-update` 后按新 key 重新注册路由。
+- 浏览器端是包内自带的 `lib/client.js`（`dsh.client` 声明），注册到 `plugins.row.config`（key 为 `dsh-pairing-entry#pairing-entry`）；表单由插件页传入，保存走 `mutate`；只依赖 `react`。
 - 入口响应是 303，带 `cache-control: no-store` 和 `referrer-policy: no-referrer`；`Location` 用相对的 `../?token=...`，不依赖 `Host` 头。
 
 ## 支持的 DSH 版本
 
-在 DSH `0.2.1-rc.2` 上实测通过：
+宿主行为在 DSH `0.2.1-rc.2` 上实测通过；配置页依赖 `0.2.2-rc.3` 起的插件页配置 slot（`plugins.row.config`）。
+
+`0.2.1-rc.2` 上实测的内容：
 
 - 配好 key 后 `/entry/<key>` 返回 303，`Location: ../?token=<当前启动 token>`；
 - 跟完整个跳转链能拿到 cookie 并加载界面；已登录的浏览器同样得到 303；

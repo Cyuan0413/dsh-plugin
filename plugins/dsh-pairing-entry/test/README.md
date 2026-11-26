@@ -16,7 +16,7 @@ node --test
 
 - `host.test.js` 用伪造的 `connection`、`webServer` 和 `ctx` 测试密钥读取与校验、路由注册、信任栅栏拒绝、303 的相对地址、方法限制和请求期的 token 失败。
 - `upstream.test.js` 在内存里伪造 credential provider，挂载真实的上游 Connection，验证真实 `BrowserAuth` 的 token、真实 `requestRejection` 的 403 判定，以及真实 Schemastery 把 volatile 字段解析成引用对象；另外用真实的 settings schema 投影确认设置面板只会看到 `key` 一个字段、无 key 时该字段仍可编辑。
-- `client.test.js` 在 Node 里伪造 `window.__ModuleLoader__`、`react` 和客户端服务，加载 `lib/client.js`，检查 bundle 的 id、`inject`、字典、tab 注册，以及用最小 hook 运行时渲染出的表单状态（加载中、不可用、空密钥、只读、生成、保存、清除）。
+- `client.test.js` 在 Node 里伪造 `window.__ModuleLoader__`、`react` 和客户端服务，加载 `lib/client.js`，检查 bundle 的 id、`inject`、字典、插件行配置注册，以及用最小 hook 运行时渲染出的表单状态（加载中、不可用、空密钥、只读、生成、保存、清除）。
 
 浏览器里的实际外观与交互测不到，那部分只能手点。
 

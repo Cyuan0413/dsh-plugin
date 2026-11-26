@@ -8,8 +8,8 @@
  * `/entry/<key>`, which redirects to `/` carrying the current launch token; the
  * browser then mints the cookie exactly as it would from the printed address.
  *
- * The key is ordinary plugin config. It is marked volatile so Web Settings can
- * read and write it while the entry runs. A volatile-only change does not reload
+ * The key is ordinary plugin config. It is marked volatile so the Plugins page
+ * (the pairing-entry row) can read and write it while the entry runs. A volatile-only change does not reload
  * the entry (the Loader commits the new reference into the running fiber), so the
  * route follows `loader/volatile-update` and re-registers under the new key.
  *
@@ -52,14 +52,14 @@ const TOKEN_QUERY = 'token';
 
 /**
  * Config for the profile patch layer. The field is volatile, which is what makes
- * it visible to — and writable from — the Web Settings form while this entry is
- * running. Schemastery accepts a missing field, so an unconfigured install loads
+ * it visible to — and writable from — the Plugins page row config while this
+ * entry is running. Schemastery accepts a missing field, so an unconfigured install loads
  * without serving a route instead of failing the entry.
  */
 export const Config = z.object({
   key: z
     .string()
-    .description('Long-lived key of the /entry page. At least 32 characters from A-Z, a-z, 0-9, "-" and "_". Set it in Web Settings > Plugins > Pairing entry.')
+    .description('Long-lived key of the /entry page. At least 32 characters from A-Z, a-z, 0-9, "-" and "_". Set it on the Plugins page, on the pairing-entry row.')
     .volatile(),
 });
 
@@ -203,7 +203,7 @@ export function apply(ctx, config) {
     const problem = keyProblem(key);
     if (problem !== undefined) {
       stop();
-      ctx.logger.warn(`${name}: ${problem}. No ${ENTRY_PATH_PREFIX}<key> page is served; set the key in Web Settings > Plugins > Pairing entry.`);
+      ctx.logger.warn(`${name}: ${problem}. No ${ENTRY_PATH_PREFIX}<key> page is served; set the key on the Plugins page, on the pairing-entry row.`);
       return;
     }
     const path = entryPath(key);

@@ -273,7 +273,7 @@ describe('apply', () => {
     assert.equal(ctx.effects.length, 1);
     assert.equal(ctx.warnings.length, 1);
     assert.match(ctx.warnings[0], /no key is configured/u);
-    assert.match(ctx.warnings[0], /Web Settings/u);
+    assert.match(ctx.warnings[0], /Plugins page, on the pairing-entry row/u);
   });
 
   it('stays loadable with an unusable key and says why', () => {
