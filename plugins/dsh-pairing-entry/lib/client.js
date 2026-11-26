@@ -313,42 +313,11 @@ window.__ModuleLoader__.load({
     }
 
     /** Services the config slots need: slot registration and locale copy. */
-    const inject = ['slots', 'locale'];
-
-    /** Holds the `configForms` controller wrapped as a page form, once one is found. */
-    const box = {
-      current: undefined,
-      listeners: new Set(),
-      set(form) {
-        box.current = form;
-        for (const listener of [...box.listeners]) listener();
-      },
-      subscribe(listener) {
-        box.listeners.add(listener);
-        return () => { box.listeners.delete(listener); };
-      },
-    };
-
-    /**
-     * Read the entry's form controller from a `configForms` service.
-     * @param forms - the service, or anything else.
-     * @returns the controller, or `undefined` when missing or not controller-shaped.
-     */
-    function readController(forms) {
-      if (typeof forms?.get !== 'function') return undefined;
-      let controller;
-      try {
-        controller = forms.get(ENTRY_ID);
-      } catch (_error) {
-        return undefined;
-      }
-      if (typeof controller?.getSnapshot !== 'function' || typeof controller.mutate !== 'function') return undefined;
-      return controller;
-    }
+    const inject = ['slots', 'locale', 'configForms'];
 
     /**
      * Wrap a controller the way the Plugins page wraps one for a row slot.
-     * @param controller - a controller accepted by `readController`.
+     * @param controller - a controller with `getSnapshot` and `mutate`.
      * @returns a form with `state`, `subscribe` and `mutate`.
      */
     function wrap(controller) {
@@ -362,77 +331,80 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The `configForms` service when the context already has it.
-     * @param ctx - the client plugin context.
-     * @returns the service, or `undefined`.
+     * Whether a settings-document schema describes the `/entry page` key.
+     * @param schema - the namespace's serialized schema, or anything else.
+     * @returns `true` when a node description mentions `/entry page`.
      */
-    function formsOf(ctx) {
-      try {
-        if (ctx.configForms) return ctx.configForms;
-        if (typeof ctx.get === 'function') return ctx.get('configForms', false);
-      } catch (_error) {
-        return undefined;
+    function schemaMentionsEntry(schema) {
+      const refs = schema?.refs;
+      if (refs === null || typeof refs !== 'object') return false;
+      for (const node of Object.values(refs)) {
+        const description = node?.meta?.description;
+        if (typeof description === 'string' && description.includes('/entry page')) return true;
       }
-      return undefined;
+      return false;
     }
 
     /**
-     * Fill the box from `configForms`, now or when the service arrives. Never throws.
-     * @param ctx - the client plugin context.
-     * @param target - the form box to fill.
+     * Choose the `configForms` namespace that holds this plugin's key.
+     * @param snapshot - the `configForms.describe()` snapshot, or anything else.
+     * @returns `ENTRY_ID` when listed, else the namespace describing the key, else `ENTRY_ID`.
      */
-    function adopt(ctx, target) {
-      const report = (error) => {
-        try { ctx.logger?.error?.(error); } catch (_ignored) { /* logging is best effort */ }
-      };
-      try {
-        const controller = readController(formsOf(ctx));
-        if (controller !== undefined) target.set(wrap(controller));
-        if (target.current !== undefined || typeof ctx.inject !== 'function') return;
-        ctx.inject(['configForms'], (inner) => {
-          try {
-            const late = readController(inner?.configForms);
-            if (late !== undefined) target.set(wrap(late));
-          } catch (error) {
-            report(error);
-          }
-        });
-      } catch (error) {
-        report(error);
-      }
-    }
-
-    /**
-     * Use the page's form when passed; otherwise follow the box.
-     * @param passed - the `form` prop, or `undefined`.
-     * @returns the form to edit, or `undefined`.
-     */
-    function useResolvedForm(passed) {
-      const [, bump] = react.useState(0);
-      react.useEffect(() => {
-        if (passed !== undefined) return undefined;
-        return box.subscribe(() => bump({}));
-      }, [passed]);
-      return passed ?? box.current;
+    function pickNamespace(snapshot) {
+      const namespaces = snapshot?.view?.namespaces ?? [];
+      if (namespaces.some((item) => item.ns === ENTRY_ID)) return ENTRY_ID;
+      const described = namespaces.find((item) => schemaMentionsEntry(item.schema));
+      return described?.ns ?? ENTRY_ID;
     }
 
     /**
      * Register the settings section, the row config and the bundle config.
-     * The settings section makes the component row a button whatever bundle it
-     * sits in; the row and bundle slots serve a card whose package name is
-     * `dsh-pairing-entry`. Writes use the page form when passed, otherwise the
-     * `configForms` controller. A missing controller does not fail the client.
+     * The plugin injects `configForms`; the settings section, the row slot and
+     * the bundle slot share one form. Its namespace is `pairing-entry` when the
+     * settings document lists it, otherwise the namespace whose schema describes
+     * the `/entry page` key. Writes use the page form when passed. A missing or
+     * odd `configForms` does not fail the client.
      * @param ctx - the client plugin context.
      */
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), `${NS}: dictionaries`);
       const t = ctx.locale.bind(NS);
-      adopt(ctx, box);
+      const forms = ctx.configForms;
+      let describe;
+      try {
+        describe = typeof forms?.describe === 'function' ? forms.describe() : undefined;
+      } catch (_error) {
+        describe = undefined;
+      }
+
+      const wrapped = new Map();
+      function formFor(ns) {
+        if (typeof forms?.get !== 'function') return undefined;
+        if (wrapped.has(ns)) return wrapped.get(ns);
+        let controller;
+        try {
+          controller = forms.get(ns);
+        } catch (_error) {
+          return undefined;
+        }
+        if (typeof controller?.getSnapshot !== 'function' || typeof controller?.mutate !== 'function') return undefined;
+        const form = wrap(controller);
+        wrapped.set(ns, form);
+        return form;
+      }
 
       function PairingEntryConfig(props) {
+        const [ns, setNs] = react.useState(() => pickNamespace(describe?.getSnapshot?.()));
+        react.useEffect(() => {
+          if (typeof describe?.subscribe !== 'function') return undefined;
+          return describe.subscribe(() => {
+            const next = pickNamespace(describe.getSnapshot());
+            setNs((current) => (current === next ? current : next));
+          });
+        }, [describe]);
         return PairingEntrySettingsTab({
           view: props.view ?? 'page',
-          form: useResolvedForm(props.form),
+          form: props.form ?? formFor(ns),
           t: props.t ?? t,
         });
       }

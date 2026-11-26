@@ -139,7 +139,7 @@ function fakeForm(snapshot) {
 
 /**
  * Mount the client plugin over stand-in services.
- * @param extra - optional extra context members, such as `inject`.
+ * @param extra - optional extra context members, such as `configForms`.
  * @returns the recorded slot registration and locale dictionaries.
  */
 function mountClient(extra = {}) {
@@ -169,6 +169,14 @@ function mountClient(extra = {}) {
         return () => {};
       },
     },
+    configForms: {
+      describe: () => ({ getSnapshot: () => ({ view: { namespaces: [] } }), subscribe: () => () => {} }),
+      get: () => ({
+        getSnapshot: () => ({ status: 'unavailable', writable: false }),
+        subscribe: () => () => {},
+        mutate: async () => false,
+      }),
+    },
     ...extra,
   };
   exports.apply(ctx);
@@ -189,7 +197,7 @@ describe('bundle shape', () => {
     const { exports, required, registration } = materialize();
     assert.equal(registration.id, 'dsh-pairing-entry');
     assert.deepEqual(required, ['react']);
-    assert.deepEqual(exports.inject, ['slots', 'locale']);
+    assert.deepEqual(exports.inject, ['slots', 'locale', 'configForms']);
     assert.equal(typeof exports.apply, 'function');
   });
 
@@ -222,27 +230,39 @@ describe('bundle shape', () => {
 describe('configForms controller', () => {
   const controllerOf = () => ({ ...fakeForm(READY), getSnapshot: () => READY, subscribe: () => () => {} });
 
+  /**
+   * A describe face whose document is fixed before the first render.
+   * @param namespaces - settings namespaces the document lists.
+   * @param get - `configForms.get` implementation.
+   * @returns the `configForms` stand-in.
+   */
+  function formsWith(namespaces, get) {
+    return {
+      describe: () => ({ getSnapshot: () => ({ view: { namespaces } }), subscribe: () => () => {} }),
+      get,
+    };
+  }
+
   it('feeds the bundle slot when the page passes no form', () => {
     const requested = [];
     const controller = controllerOf();
     const { slots } = mountClient({
-      inject(_names, callback) {
-        callback({ configForms: { get(id) { requested.push(id); return controller; } } });
-      },
+      configForms: formsWith([{ ns: 'pairing-entry' }], (id) => {
+        requested.push(id);
+        return controller;
+      }),
     });
-    assert.deepEqual(requested, ['pairing-entry']);
     assert.equal(slots.length, 3);
     const bundle = slots.find((slot) => slot.options.name === 'plugins.bundle.config');
     const tree = render(bundle.component, { view: 'page', t: (key) => key });
+    assert.deepEqual(requested, ['pairing-entry']);
     assert.equal(input(tree).props.value, KEY);
   });
 
   it('feeds the settings section with only a translator, as the page renders it', () => {
     const controller = controllerOf();
     const { slots } = mountClient({
-      inject(_names, callback) {
-        callback({ configForms: { get() { return controller; } } });
-      },
+      configForms: formsWith([{ ns: 'pairing-entry' }], () => controller),
     });
     const section = slots.find((slot) => slot.options.name === 'settings.section');
     const tree = render(section.component, { t: (key) => key });
@@ -252,20 +272,45 @@ describe('configForms controller', () => {
   it('does not throw for a controller without mutate and shows unavailable', () => {
     const controller = { getSnapshot: () => READY, subscribe: () => () => {} };
     const { slots } = mountClient({
-      inject(_names, callback) {
-        callback({ configForms: { get() { return controller; } } });
-      },
+      configForms: formsWith([{ ns: 'pairing-entry' }], () => controller),
     });
     assert.equal(slots.length, 3);
     const section = slots.find((slot) => slot.options.name === 'settings.section');
     assert.deepEqual(texts(render(section.component, { t: (key) => key })), ['unavailable']);
   });
 
-  it('still registers every slot when inject never calls back', () => {
-    const requests = [];
-    const { slots } = mountClient({ inject(names) { requests.push(names); } });
-    assert.deepEqual(requests, [['configForms']]);
-    assert.equal(slots.length, 3);
+  it('uses the namespace whose schema describes the entry key', () => {
+    const requested = [];
+    const controller = controllerOf();
+    const schema = {
+      uid: 1,
+      refs: { 1: { meta: { description: 'Long-lived key of the /entry page. At least 32 characters' } } },
+    };
+    const { slots } = mountClient({
+      configForms: formsWith([{ ns: 'custom-entry', schema }], (id) => {
+        requested.push(id);
+        return controller;
+      }),
+    });
+    const section = slots.find((slot) => slot.options.name === 'settings.section');
+    const tree = render(section.component, { t: (key) => key });
+    assert.equal(input(tree).props.value, KEY);
+    assert.deepEqual(requested, ['custom-entry']);
+  });
+
+  it('prefers pairing-entry when the document lists it', () => {
+    const requested = [];
+    const controller = controllerOf();
+    const schema = { uid: 1, refs: { 1: { meta: { description: 'Long-lived key of the /entry page' } } } };
+    const { slots } = mountClient({
+      configForms: formsWith([{ ns: 'custom-entry', schema }, { ns: 'pairing-entry' }], (id) => {
+        requested.push(id);
+        return controller;
+      }),
+    });
+    const section = slots.find((slot) => slot.options.name === 'settings.section');
+    render(section.component, { t: (key) => key });
+    assert.deepEqual(requested, ['pairing-entry']);
   });
 });
 
