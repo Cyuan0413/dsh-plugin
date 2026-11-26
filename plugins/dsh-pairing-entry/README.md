@@ -48,7 +48,7 @@ dsh plugin --profile web add link:/绝对路径/dsh-plugin/plugins/dsh-pairing-e
 
 ## 配置
 
-在 Web 界面里配置：打开插件页，在 `dsh-pairing-entry` 这一行点「配置」，填入 key 后保存。
+在 Web 界面里配置：打开插件页里的 `dsh-pairing-entry` 卡片，密钥输入在「包含的组件」上方，填入 key 后保存。
 
 - 保存会写进当前 profile 的 `cordis.patch.yml`（`id: pairing-entry` 的 `config.key`）。`key` 是 volatile 字段，Loader 把新值直接提交给运行中的实例，插件随即按新 key 重新注册路由，不用重启 DSH。
 - 「随机生成」按钮生成 32 个字符的 key，等价于 `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`。
@@ -108,6 +108,7 @@ key 的要求：
 - key 用 Schemastery 的 `volatile` 字段声明。这是配置页能读写它的前提：只展示和写入 volatile 字段。
 - 保存落到 profile patch；volatile 字段的变化由 Loader 提交到运行中的实例（不重载条目），插件监听 `loader/volatile-update` 后按新 key 重新注册路由。
 - 浏览器端是包内自带的 `lib/client.js`（`dsh.client` 声明），注册到 `plugins.row.config`（key 为 `dsh-pairing-entry#pairing-entry`）；表单由插件页传入，保存走 `mutate`；只依赖 `react`。
+- 卡片上的表单注册为 `plugins.bundle.config`（key 为 `dsh-pairing-entry`），通过 `configForms.get('pairing-entry')` 读写；行上的配置仍是 `plugins.row.config`。
 - 入口响应是 303，带 `cache-control: no-store` 和 `referrer-policy: no-referrer`；`Location` 用相对的 `../?token=...`，不依赖 `Host` 头。
 
 ## 支持的 DSH 版本

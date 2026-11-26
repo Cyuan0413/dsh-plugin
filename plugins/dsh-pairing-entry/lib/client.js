@@ -6,8 +6,14 @@ window.__ModuleLoader__.load({
     /** Locale namespace this plugin owns. */
     const NS = 'pairing-entry';
 
+    /** Package name; also the key of the card-level (bundle) config slot. */
+    const PACKAGE = 'dsh-pairing-entry';
+
+    /** Loader entry id; also the `configForms` namespace. */
+    const ENTRY_ID = 'pairing-entry';
+
     /** Row config slot key: `<package name>#<row id>`. */
-    const ROW_KEY = 'dsh-pairing-entry#pairing-entry';
+    const ROW_KEY = PACKAGE + '#' + ENTRY_ID;
 
     /** Minimum key length, mirroring the Host's validation. */
     const MIN_KEY_LENGTH = 32;
@@ -153,11 +159,29 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The Plugins page row config that edits the entry key.
+     * Track a form's snapshot. The first render already reads `form.state`;
+     * a `subscribe` method keeps it current afterwards.
+     * @param form - page form (`state`, `subscribe`, `mutate`), or `undefined`.
+     * @returns the current snapshot, or `undefined` without a form.
+     */
+    function useFormSnapshot(form) {
+      const [snapshot, setSnapshot] = react.useState(() => (form === undefined ? undefined : form.state));
+      react.useEffect(() => {
+        if (form === undefined) return undefined;
+        setSnapshot(form.state);
+        if (typeof form.subscribe !== 'function') return undefined;
+        return form.subscribe(() => setSnapshot(form.state));
+      }, [form]);
+      return snapshot;
+    }
+
+    /**
+     * The config form that edits the entry key, for the Plugins page row and card.
      * @param props - the page host's `view` and form, and the slot's locale translator.
-     * @returns the row summary or the config form.
+     * @returns the summary or the config form.
      */
     function PairingEntrySettingsTab({ view, form, t }) {
+      const snapshot = useFormSnapshot(form);
       const [draft, setDraft] = react.useState(null);
       const [busy, setBusy] = react.useState(false);
       const [notice, setNotice] = react.useState('');
@@ -165,8 +189,9 @@ window.__ModuleLoader__.load({
       const inputId = react.useId();
 
       if (view === 'summary') return t('summary');
-      if (form === undefined) return react.createElement('p', { style: STYLE_HINT }, t('unavailable'));
-      const snapshot = form.state;
+      if (form === undefined || snapshot === null || typeof snapshot !== 'object') {
+        return react.createElement('p', { style: STYLE_HINT }, t('unavailable'));
+      }
       if (snapshot.status === 'loading') return react.createElement('p', { style: STYLE_HINT }, t('loading'));
       if (snapshot.status === 'unavailable') return react.createElement('p', { style: STYLE_HINT }, t('unavailable'));
 
@@ -289,7 +314,8 @@ window.__ModuleLoader__.load({
     const inject = ['slots', 'locale'];
 
     /**
-     * Register the Plugins page row config.
+     * Register the Plugins page row config, and the card config once
+     * `configForms` is available.
      * @param ctx - the client plugin context.
      */
     function apply(ctx) {
@@ -299,6 +325,28 @@ window.__ModuleLoader__.load({
         key: ROW_KEY,
         locale: NS,
       }, PairingEntrySettingsTab));
+
+      if (typeof ctx.inject !== 'function') return;
+      ctx.inject(['configForms'], (inner) => {
+        const controller = inner.configForms.get(ENTRY_ID);
+        if (typeof controller?.getSnapshot !== 'function'
+          || typeof controller.subscribe !== 'function'
+          || typeof controller.mutate !== 'function') {
+          throw new Error(`${PACKAGE}: configForms.get("${ENTRY_ID}") does not return a form controller`);
+        }
+        // The card slot passes no form, so wrap the controller the way the page does.
+        const pageForm = {
+          get state() { return controller.getSnapshot(); },
+          subscribe: (listener) => controller.subscribe(listener),
+          mutate: (ops, revision) => controller.mutate(ops, revision),
+        };
+        const BundleConfig = (props) => PairingEntrySettingsTab({ ...props, form: props.form ?? pageForm });
+        ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+          name: 'plugins.bundle.config',
+          key: PACKAGE,
+          locale: NS,
+        }, BundleConfig));
+      });
     }
 
     return { inject, apply };

@@ -139,9 +139,10 @@ function fakeForm(snapshot) {
 
 /**
  * Mount the client plugin over stand-in services.
+ * @param extra - optional extra context members, such as `inject`.
  * @returns the recorded slot registration and locale dictionaries.
  */
-function mountClient() {
+function mountClient(extra = {}) {
   react = createReactStub();
   const { exports } = materialize();
   const localeNamespaces = [];
@@ -168,6 +169,7 @@ function mountClient() {
         return () => {};
       },
     },
+    ...extra,
   };
   exports.apply(ctx);
   return { exports, localeNamespaces, slots };
@@ -208,6 +210,26 @@ describe('bundle shape', () => {
     assert.equal(options.locale, 'pairing-entry');
     assert.equal('inject' in options, false);
     assert.equal(typeof component, 'function');
+  });
+});
+
+describe('card config', () => {
+  it('registers a bundle config from the configForms controller', () => {
+    const requested = [];
+    const controller = { ...fakeForm(READY), getSnapshot: () => READY, subscribe: () => () => {} };
+    const { slots } = mountClient({
+      inject(_names, callback) {
+        callback({ configForms: { get(id) { requested.push(id); return controller; } } });
+      },
+    });
+    assert.deepEqual(requested, ['pairing-entry']);
+    assert.equal(slots.length, 2);
+    const bundle = slots[1];
+    assert.equal(bundle.options.name, 'plugins.bundle.config');
+    assert.equal(bundle.options.key, 'dsh-pairing-entry');
+    assert.equal('inject' in bundle.options, false);
+    const tree = render(bundle.component, { view: 'page', t: (key) => key });
+    assert.equal(input(tree).props.value, KEY);
   });
 });
 
