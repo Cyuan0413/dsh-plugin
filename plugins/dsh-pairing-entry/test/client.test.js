@@ -177,6 +177,11 @@ function mountClient(extra = {}) {
         mutate: async () => false,
       }),
     },
+    get(name) {
+      if (name === 'configForms') return this.configForms;
+      if (name === 'remote') return this.remote;
+      return undefined;
+    },
     ...extra,
   };
   exports.apply(ctx);
@@ -197,7 +202,7 @@ describe('bundle shape', () => {
     const { exports, required, registration } = materialize();
     assert.equal(registration.id, 'dsh-pairing-entry');
     assert.deepEqual(required, ['react']);
-    assert.deepEqual(exports.inject, ['slots', 'locale', 'configForms']);
+    assert.deepEqual(exports.inject, ['slots', 'locale']);
     assert.equal(typeof exports.apply, 'function');
   });
 
@@ -311,6 +316,46 @@ describe('configForms controller', () => {
     const section = slots.find((slot) => slot.options.name === 'settings.section');
     render(section.component, { t: (key) => key });
     assert.deepEqual(requested, ['pairing-entry']);
+  });
+
+  it('activates when configForms is not provided', () => {
+    const { slots } = mountClient({ configForms: undefined, get() { return undefined; } });
+    assert.equal(slots.length, 3);
+    const section = slots.find((slot) => slot.options.name === 'settings.section');
+    const tree = render(section.component, { t: (key) => key });
+    assert.deepEqual(texts(tree), ['unavailable']);
+  });
+
+  it('reads the key through remote.settings when configForms is absent', async () => {
+    const writes = [];
+    const settings = {
+      async describe() {
+        return {
+          ok: true,
+          value: { writable: true, namespaces: [{ ns: 'pairing-entry', value: { key: KEY }, revision: 3 }] },
+        };
+      },
+      async mutate(ns, ops, revision) {
+        writes.push({ ns, ops, revision });
+        return { ok: false };
+      },
+    };
+    const { slots } = mountClient({ configForms: undefined, remote: { settings } });
+    const section = slots.find((slot) => slot.options.name === 'settings.section');
+    render(section.component, { t: (key) => key });
+    await Promise.resolve();
+    await Promise.resolve();
+    let tree = render(section.component, { t: (key) => key });
+    assert.equal(input(tree).props.value, KEY);
+    button(tree, 'generate').props.onClick();
+    tree = render(section.component, { t: (key) => key });
+    button(tree, 'save').props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(writes[0].ns, 'pairing-entry');
+    assert.equal(writes[0].revision, 3);
+    assert.equal(writes[0].ops[0].op, 'set');
+    assert.equal(writes[0].ops[0].path[0], 'key');
   });
 });
 

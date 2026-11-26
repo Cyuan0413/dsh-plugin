@@ -108,7 +108,7 @@ key 的要求：
 - key 用 Schemastery 的 `volatile` 字段声明。这是配置页能读写它的前提：只展示和写入 volatile 字段。
 - 保存落到 profile patch；volatile 字段的变化由 Loader 提交到运行中的实例（不重载条目），插件监听 `loader/volatile-update` 后按新 key 重新注册路由。
 - 浏览器端是包内自带的 `lib/client.js`（`dsh.client` 声明），只依赖 `react`。它注册 `settings.section`（id 为 `pairing-entry`）。插件页按模块名 `dsh-pairing-entry` 把它匹配到对应的行，所以即使这一行位于 profile 的 bundle 里、而不是名为 `dsh-pairing-entry` 的卡片里，组件名称也是可点击的按钮。
-- 它同时注册 `plugins.row.config`（key 为 `dsh-pairing-entry#pairing-entry`）和 `plugins.bundle.config`（key 为 `dsh-pairing-entry`）。客户端依赖 `configForms`。设置文档里有 `pairing-entry` 时编辑这个命名空间；否则编辑 schema 描述了这个 `/entry page` 密钥的那个命名空间。文档里两者都没有时，页面停在不可用提示上，不会让客户端加载失败。插件页把 `form` 传给行 slot 时，用传入的表单。
+- 它同时注册 `plugins.row.config`（key 为 `dsh-pairing-entry#pairing-entry`）和 `plugins.bundle.config`（key 为 `dsh-pairing-entry`）。客户端不把 `configForms` 列进依赖：DSH 不提供这个服务时，列进去会让客户端一直停在 pending。已经提供时直接用它；没有时改用已经提供的 `remote.settings`。设置文档里有 `pairing-entry` 就编辑这个命名空间，否则编辑 schema 描述了这个 `/entry page` 密钥的命名空间。插件页传入 `form` 时用传入的表单。
 - 入口响应是 303，带 `cache-control: no-store` 和 `referrer-policy: no-referrer`；`Location` 用相对的 `../?token=...`，不依赖 `Host` 头。
 
 ## 支持的 DSH 版本

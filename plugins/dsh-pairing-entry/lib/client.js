@@ -312,8 +312,11 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** Services the config slots need: slot registration and locale copy. */
-    const inject = ['slots', 'locale', 'configForms'];
+    /**
+     * Slot registration and locale copy. `configForms` is not a dependency:
+     * a DSH that does not provide it leaves this client pending forever.
+     */
+    const inject = ['slots', 'locale'];
 
     /**
      * Wrap a controller the way the Plugins page wraps one for a row slot.
@@ -358,36 +361,142 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Read a service that is already provided. This does not wait, so a missing
+     * service cannot leave the client pending.
+     * @param ctx - the client plugin context.
+     * @param name - service name.
+     * @returns the service, or `undefined`.
+     */
+    function provided(ctx, name) {
+      if (typeof ctx.get !== 'function') return undefined;
+      try {
+        return ctx.get(name, false);
+      } catch (_error) {
+        return undefined;
+      }
+    }
+
+    /**
+     * The settings RPC when the client already has `remote`. `describe()` returns
+     * `{ ok, value }` and `value` is `{ namespaces, writable }`.
+     * @param ctx - the client plugin context.
+     * @returns the settings namespace, or `undefined`.
+     */
+    function remoteSettings(ctx) {
+      const settings = provided(ctx, 'remote')?.settings;
+      if (typeof settings?.describe !== 'function' || typeof settings?.mutate !== 'function') return undefined;
+      return settings;
+    }
+
+    /**
+     * Unwrap a describe or mutate answer into the settings document.
+     * @param response - an RPC result, a document, or anything else.
+     * @returns the document, or `undefined`.
+     */
+    function documentOf(response) {
+      if (response?.ok === true && response.value?.namespaces) return response.value;
+      if (response?.namespaces) return response;
+      return undefined;
+    }
+
+    /**
+     * A page form backed by `remote.settings`, for a DSH that has no `configForms`.
+     * @param settings - the settings RPC.
+     * @returns a form with `state`, `subscribe` and `mutate`.
+     */
+    function remoteForm(settings) {
+      let document;
+      let snapshot = { status: 'loading', writable: false };
+      const listeners = new Set();
+      const publish = (next) => {
+        snapshot = next;
+        for (const listener of listeners) listener();
+      };
+      const applyDocument = (next) => {
+        document = next;
+        const ns = pickNamespace({ view: next });
+        const row = next?.namespaces?.find((item) => item.ns === ns);
+        if (!row) {
+          publish({ status: 'unavailable', writable: next?.writable === true });
+          return;
+        }
+        publish({
+          status: 'ready',
+          writable: next.writable === true,
+          value: row.value,
+          base: row.base,
+          user: row.user,
+          revision: row.revision,
+        });
+      };
+      const load = async () => {
+        try {
+          const document = documentOf(await settings.describe());
+          if (document) applyDocument(document);
+          else publish({ status: 'unavailable', writable: false });
+        } catch (_error) {
+          publish({ status: 'unavailable', writable: false });
+        }
+      };
+      void load();
+      return {
+        get state() { return snapshot; },
+        subscribe(listener) {
+          listeners.add(listener);
+          return () => { listeners.delete(listener); };
+        },
+        async mutate(ops, revision) {
+          const ns = pickNamespace({ view: document });
+          try {
+            const response = await settings.mutate(ns, ops, revision);
+            if (response?.ok === false) {
+              await load();
+              return false;
+            }
+            const written = documentOf(response);
+            if (written) applyDocument(written);
+            else await load();
+            return true;
+          } catch (_error) {
+            return false;
+          }
+        },
+      };
+    }
+
+    /**
      * Register the settings section, the row config and the bundle config.
-     * The plugin injects `configForms`; the settings section, the row slot and
-     * the bundle slot share one form. Its namespace is `pairing-entry` when the
+     * The page form wins when one is passed. Otherwise an already-provided
+     * `configForms` is used, and failing that an already-provided `remote.settings`.
+     * Neither service is waited on. The namespace is `pairing-entry` when the
      * settings document lists it, otherwise the namespace whose schema describes
-     * the `/entry page` key. Writes use the page form when passed. A missing or
-     * odd `configForms` does not fail the client.
+     * the `/entry page` key.
      * @param ctx - the client plugin context.
      */
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), `${NS}: dictionaries`);
       const t = ctx.locale.bind(NS);
-      const forms = ctx.configForms;
+      const forms = provided(ctx, 'configForms');
       let describe;
       try {
         describe = typeof forms?.describe === 'function' ? forms.describe() : undefined;
       } catch (_error) {
         describe = undefined;
       }
+      const settings = forms ? undefined : remoteSettings(ctx);
+      const fallback = settings ? remoteForm(settings) : undefined;
 
       const wrapped = new Map();
       function formFor(ns) {
-        if (typeof forms?.get !== 'function') return undefined;
+        if (typeof forms?.get !== 'function') return fallback;
         if (wrapped.has(ns)) return wrapped.get(ns);
         let controller;
         try {
           controller = forms.get(ns);
         } catch (_error) {
-          return undefined;
+          return fallback;
         }
-        if (typeof controller?.getSnapshot !== 'function' || typeof controller?.mutate !== 'function') return undefined;
+        if (typeof controller?.getSnapshot !== 'function' || typeof controller?.mutate !== 'function') return fallback;
         const form = wrap(controller);
         wrapped.set(ns, form);
         return form;
