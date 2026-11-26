@@ -26,6 +26,7 @@ window.__ModuleLoader__.load({
 
     const zh = {
       summary: '收藏一个固定入口地址，用来换取当前启动 token',
+      tab: '入口密钥',
       intro: '收藏这个入口地址，它会把浏览器带到当前进程的启动 token 上。密钥保存后立即生效，修改后旧的收藏地址失效。',
       label: '入口密钥',
       placeholder: '至少 32 个字符，只用 A-Z、a-z、0-9、- 和 _',
@@ -50,6 +51,7 @@ window.__ModuleLoader__.load({
 
     const en = {
       summary: 'Bookmark a fixed entry address that reaches the current launch token',
+      tab: 'Entry key',
       intro: 'Bookmark this entry address: it takes the browser to the current process launch token. A saved key applies immediately; changing it invalidates the old bookmark.',
       label: 'Entry key',
       placeholder: 'At least 32 characters from A-Z, a-z, 0-9, - and _',
@@ -310,43 +312,148 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** Services the row config needs: slot registration and locale copy. */
+    /** Services the config slots need: slot registration and locale copy. */
     const inject = ['slots', 'locale'];
 
+    /** Holds the `configForms` controller wrapped as a page form, once one is found. */
+    const box = {
+      current: undefined,
+      listeners: new Set(),
+      set(form) {
+        box.current = form;
+        for (const listener of [...box.listeners]) listener();
+      },
+      subscribe(listener) {
+        box.listeners.add(listener);
+        return () => { box.listeners.delete(listener); };
+      },
+    };
+
     /**
-     * Register the Plugins page row config, and the card config once
-     * `configForms` is available.
+     * Read the entry's form controller from a `configForms` service.
+     * @param forms - the service, or anything else.
+     * @returns the controller, or `undefined` when missing or not controller-shaped.
+     */
+    function readController(forms) {
+      if (typeof forms?.get !== 'function') return undefined;
+      let controller;
+      try {
+        controller = forms.get(ENTRY_ID);
+      } catch (_error) {
+        return undefined;
+      }
+      if (typeof controller?.getSnapshot !== 'function' || typeof controller.mutate !== 'function') return undefined;
+      return controller;
+    }
+
+    /**
+     * Wrap a controller the way the Plugins page wraps one for a row slot.
+     * @param controller - a controller accepted by `readController`.
+     * @returns a form with `state`, `subscribe` and `mutate`.
+     */
+    function wrap(controller) {
+      return {
+        get state() { return controller.getSnapshot(); },
+        subscribe(listener) {
+          return typeof controller.subscribe === 'function' ? controller.subscribe(listener) : () => {};
+        },
+        mutate(ops, revision) { return controller.mutate(ops, revision); },
+      };
+    }
+
+    /**
+     * The `configForms` service when the context already has it.
+     * @param ctx - the client plugin context.
+     * @returns the service, or `undefined`.
+     */
+    function formsOf(ctx) {
+      try {
+        if (ctx.configForms) return ctx.configForms;
+        if (typeof ctx.get === 'function') return ctx.get('configForms', false);
+      } catch (_error) {
+        return undefined;
+      }
+      return undefined;
+    }
+
+    /**
+     * Fill the box from `configForms`, now or when the service arrives. Never throws.
+     * @param ctx - the client plugin context.
+     * @param target - the form box to fill.
+     */
+    function adopt(ctx, target) {
+      const report = (error) => {
+        try { ctx.logger?.error?.(error); } catch (_ignored) { /* logging is best effort */ }
+      };
+      try {
+        const controller = readController(formsOf(ctx));
+        if (controller !== undefined) target.set(wrap(controller));
+        if (target.current !== undefined || typeof ctx.inject !== 'function') return;
+        ctx.inject(['configForms'], (inner) => {
+          try {
+            const late = readController(inner?.configForms);
+            if (late !== undefined) target.set(wrap(late));
+          } catch (error) {
+            report(error);
+          }
+        });
+      } catch (error) {
+        report(error);
+      }
+    }
+
+    /**
+     * Use the page's form when passed; otherwise follow the box.
+     * @param passed - the `form` prop, or `undefined`.
+     * @returns the form to edit, or `undefined`.
+     */
+    function useResolvedForm(passed) {
+      const [, bump] = react.useState(0);
+      react.useEffect(() => {
+        if (passed !== undefined) return undefined;
+        return box.subscribe(() => bump({}));
+      }, [passed]);
+      return passed ?? box.current;
+    }
+
+    /**
+     * Register the settings section, the row config and the bundle config.
+     * The settings section makes the component row a button whatever bundle it
+     * sits in; the row and bundle slots serve a card whose package name is
+     * `dsh-pairing-entry`. Writes use the page form when passed, otherwise the
+     * `configForms` controller. A missing controller does not fail the client.
      * @param ctx - the client plugin context.
      */
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), `${NS}: dictionaries`);
+      const t = ctx.locale.bind(NS);
+      adopt(ctx, box);
+
+      function PairingEntryConfig(props) {
+        return PairingEntrySettingsTab({
+          view: props.view ?? 'page',
+          form: useResolvedForm(props.form),
+          t: props.t ?? t,
+        });
+      }
+
+      ctx.slots.inject('settings.section', () => ctx.slots.register({
+        name: 'settings.section',
+        id: ENTRY_ID,
+        order: 80,
+        label: () => t('tab'),
+        locale: NS,
+      }, PairingEntryConfig));
       ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
         name: 'plugins.row.config',
         key: ROW_KEY,
         locale: NS,
-      }, PairingEntrySettingsTab));
-
-      if (typeof ctx.inject !== 'function') return;
-      ctx.inject(['configForms'], (inner) => {
-        const controller = inner.configForms.get(ENTRY_ID);
-        if (typeof controller?.getSnapshot !== 'function'
-          || typeof controller.subscribe !== 'function'
-          || typeof controller.mutate !== 'function') {
-          throw new Error(`${PACKAGE}: configForms.get("${ENTRY_ID}") does not return a form controller`);
-        }
-        // The card slot passes no form, so wrap the controller the way the page does.
-        const pageForm = {
-          get state() { return controller.getSnapshot(); },
-          subscribe: (listener) => controller.subscribe(listener),
-          mutate: (ops, revision) => controller.mutate(ops, revision),
-        };
-        const BundleConfig = (props) => PairingEntrySettingsTab({ ...props, form: props.form ?? pageForm });
-        ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
-          name: 'plugins.bundle.config',
-          key: PACKAGE,
-          locale: NS,
-        }, BundleConfig));
-      });
+      }, PairingEntryConfig));
+      ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+        name: 'plugins.bundle.config',
+        key: PACKAGE,
+        locale: NS,
+      }, PairingEntryConfig));
     }
 
     return { inject, apply };

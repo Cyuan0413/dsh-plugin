@@ -201,35 +201,71 @@ describe('bundle shape', () => {
     assert.deepEqual(Object.keys(dictionaries.zh).sort(), Object.keys(dictionaries.en).sort());
   });
 
-  it('contributes one config to the Plugins page row', () => {
+  it('contributes a settings section, a row config and a bundle config', () => {
     const { slots } = mountClient();
-    assert.equal(slots.length, 1);
-    const [{ options, component }] = slots;
-    assert.equal(options.name, 'plugins.row.config');
-    assert.equal(options.key, 'dsh-pairing-entry#pairing-entry');
-    assert.equal(options.locale, 'pairing-entry');
-    assert.equal('inject' in options, false);
-    assert.equal(typeof component, 'function');
+    assert.equal(slots.length, 3);
+    const byName = (name) => slots.find((slot) => slot.options.name === name);
+    const section = byName('settings.section');
+    assert.equal(section.options.id, 'pairing-entry');
+    assert.equal(section.options.order, 80);
+    assert.equal(section.options.locale, 'pairing-entry');
+    assert.equal(section.options.label(), 'pairing-entry/tab');
+    assert.equal(byName('plugins.row.config').options.key, 'dsh-pairing-entry#pairing-entry');
+    assert.equal(byName('plugins.bundle.config').options.key, 'dsh-pairing-entry');
+    for (const { options, component } of slots) {
+      assert.equal('inject' in options, false);
+      assert.equal(typeof component, 'function');
+    }
   });
 });
 
-describe('card config', () => {
-  it('registers a bundle config from the configForms controller', () => {
+describe('configForms controller', () => {
+  const controllerOf = () => ({ ...fakeForm(READY), getSnapshot: () => READY, subscribe: () => () => {} });
+
+  it('feeds the bundle slot when the page passes no form', () => {
     const requested = [];
-    const controller = { ...fakeForm(READY), getSnapshot: () => READY, subscribe: () => () => {} };
+    const controller = controllerOf();
     const { slots } = mountClient({
       inject(_names, callback) {
         callback({ configForms: { get(id) { requested.push(id); return controller; } } });
       },
     });
     assert.deepEqual(requested, ['pairing-entry']);
-    assert.equal(slots.length, 2);
-    const bundle = slots[1];
-    assert.equal(bundle.options.name, 'plugins.bundle.config');
-    assert.equal(bundle.options.key, 'dsh-pairing-entry');
-    assert.equal('inject' in bundle.options, false);
+    assert.equal(slots.length, 3);
+    const bundle = slots.find((slot) => slot.options.name === 'plugins.bundle.config');
     const tree = render(bundle.component, { view: 'page', t: (key) => key });
     assert.equal(input(tree).props.value, KEY);
+  });
+
+  it('feeds the settings section with only a translator, as the page renders it', () => {
+    const controller = controllerOf();
+    const { slots } = mountClient({
+      inject(_names, callback) {
+        callback({ configForms: { get() { return controller; } } });
+      },
+    });
+    const section = slots.find((slot) => slot.options.name === 'settings.section');
+    const tree = render(section.component, { t: (key) => key });
+    assert.equal(input(tree).props.value, KEY);
+  });
+
+  it('does not throw for a controller without mutate and shows unavailable', () => {
+    const controller = { getSnapshot: () => READY, subscribe: () => () => {} };
+    const { slots } = mountClient({
+      inject(_names, callback) {
+        callback({ configForms: { get() { return controller; } } });
+      },
+    });
+    assert.equal(slots.length, 3);
+    const section = slots.find((slot) => slot.options.name === 'settings.section');
+    assert.deepEqual(texts(render(section.component, { t: (key) => key })), ['unavailable']);
+  });
+
+  it('still registers every slot when inject never calls back', () => {
+    const requests = [];
+    const { slots } = mountClient({ inject(names) { requests.push(names); } });
+    assert.deepEqual(requests, [['configForms']]);
+    assert.equal(slots.length, 3);
   });
 });
 
