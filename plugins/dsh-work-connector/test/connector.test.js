@@ -23,7 +23,12 @@ const host=(records=new Map([['w',{title:'Workspace',path:process.cwd()}]]))=>{
   return {history,prompts,selections,runningModels,runningPresets,agents,creates,steps,rows,agentPresets,get made(){return made;},
     workspaceRegistry:{get(id){steps.push('workspace');const workspace=records.get(id);return workspace&&{...workspace,sessionIds:[...history.keys()]};}},
     llm:{async listModels(provider){steps.push('list models');return provider==='alternate'?[{id:'shared/model'},{id:'unavailable'}]:[];},
-      async resolveCallConfig(selection){if(selection.model==='unavailable')throw Error('provider configuration failed');return selection;}},
+      async resolveCallConfig(selection){
+        if(selection.model==='unavailable')throw Error('provider configuration failed');
+        const supported=selection.provider==='alternate'?['balanced','deep']:['balanced'];
+        if(selection.reasoningEffort!==undefined&&!supported.includes(selection.reasoningEffort))throw Object.assign(Error('private diagnostic'),{code:'UNSUPPORTED_REASONING_EFFORT'});
+        return selection;
+      }},
     sessions:{async flush(session){steps.push('flush');session.durableModel=session.currentModel;return true;}},
     sessionController:{
       async create(request){
@@ -33,7 +38,7 @@ const host=(records=new Map([['w',{title:'Workspace',path:process.cwd()}]]))=>{
         if(!preset||preset.broken)throw Object.assign(Error('private diagnostic'),{code:preset?'agent-preset/invalid':'agent-preset/not-found'});
         made++;history.set(sessionId,[]);
         const session={currentModel:defaultModel,durableModel:defaultModel,savedPreset:agentPreset};
-        agents.set(sessionId,{ctx:{boundPreset:agentPreset},session,model:{select(model){steps.push('select model');session.currentModel=model;selections.push({sessionId,model});}}});
+        agents.set(sessionId,{ctx:{boundPreset:agentPreset},session,model:{current:()=>session.currentModel,select(model){steps.push('select model');session.currentModel=model;selections.push({sessionId,model});}}});
         return {sessionId,get agentPreset(){steps.push('confirm create');return agentPreset;}};
       },
       async resolveAgent(sessionId){return {agent:agents.get(sessionId)};},
@@ -253,6 +258,62 @@ test('MCP 指定模型用于首条指令，省略模型不改变既有流程或 
   assert.equal(next.sessionId,task.sessionId);
   assert.deepEqual(h.runningModels,[selectedModel,defaultModel,selectedModel]);
   assert.deepEqual(h.selections,[{sessionId:task.sessionId,model:selectedModel}]);
+});
+
+test('新会话的首条指令使用指定思考强度，可保留原本的模型，续办不重新设置',async t=>{
+  const {h,tasks}=workspaceFixture(t,new Map([['w',{title:'Workspace',path:process.cwd()}]]),['w']);
+  const {rpc,rawCall,call}=await client(t,tasks);
+  const {result}=await (await rpc('tools/list')).json();
+  const {inputSchema}=result.tools.find(tool=>tool.name==='dispatch');
+  assert.equal(inputSchema.properties.reasoningEffort.type,'string');
+  assert.ok(!inputSchema.required.includes('reasoningEffort'));
+  assert.ok(!Object.hasOwn(result.tools.find(tool=>tool.name==='continue_task').inputSchema.properties,'reasoningEffort'));
+  for(const reasoningEffort of [null,42,'  ','x'.repeat(257)]){
+    assert.match((await rawCall('dispatch',{...args,reasoningEffort})).error.message,/reasoningEffort must be a non-blank/);
+  }
+  assert.equal(h.made,0);
+  const input={...args,model:selectedModel,reasoningEffort:'deep'};
+  const task=await call('dispatch',input);
+  assert.equal(task.status,'queued');
+  assert.deepEqual(await call('dispatch',input),task);
+  for(const reasoningEffort of ['balanced',undefined])assert.ok((await rawCall('dispatch',{...input,reasoningEffort})).error);
+  const followUp={taskId:task.taskId,idempotencyKey:'next',instruction:'continue'};
+  assert.ok((await rawCall('continue_task',{...followUp,reasoningEffort:'balanced'})).error);
+  assert.equal((await call('continue_task',followUp)).sessionId,task.sessionId);
+  const defaultRoute=await call('dispatch',{...args,idempotencyKey:'effort-only',reasoningEffort:'balanced'});
+  assert.equal(defaultRoute.status,'queued');
+  await call('dispatch',{...args,idempotencyKey:'unchanged-default'});
+  assert.deepEqual(h.runningModels,[
+    {...selectedModel,reasoningEffort:'deep'},{...selectedModel,reasoningEffort:'deep'},
+    {...defaultModel,reasoningEffort:'balanced'},defaultModel,
+  ]);
+  assert.deepEqual(h.selections.map(x=>x.sessionId),[task.sessionId,defaultRoute.sessionId]);
+});
+
+test('会话模型不支持指定档位时失败，不应用设置或提交指令',async t=>{
+  const {db,h,tasks}=workspaceFixture(t,new Map([['w',{title:'Workspace',path:process.cwd()}]]),['w']);
+  const {call}=await client(t,tasks);
+  const failed=await call('dispatch',{...args,reasoningEffort:'deep'});
+  assert.equal(failed.status,'failed');
+  assert.match(failed.summary,/default\/model.*不支持思考强度 "deep".*未提交指令/);
+  assert.deepEqual(await call('status',{taskId:failed.taskId}),failed);
+  assert.deepEqual(db.all('event').find(e=>e.taskId===failed.taskId).data,failed);
+  assert.deepEqual(h.selections,[]);
+  assert.deepEqual(h.prompts,[]);
+});
+
+test('恢复仅指定思考强度的派发时沿用中断前已确定的模型',async t=>{
+  const {db,h,tasks}=workspaceFixture(t,new Map([['w',{title:'Workspace',path:process.cwd()}]]),['w']);
+  const sessionId='existing-effort',requestId='original-request';
+  await h.sessionController.create({workspaceId:'w',sessionId});
+  // State after the route was pinned but before DSH flushed the selection.
+  db.put('task',{id:'task',sessionId,requestId,workspaceId:'w',owner:'u',status:'submitting',revision:0,cursor:-1,instruction:'本次任务',reasoningEffort:'balanced',resolvedModel:defaultModel});
+  h.agents.get(sessionId).session.currentModel=selectedModel;
+  await tasks.refresh(db.get('task','task'));
+  assert.equal(db.get('task','task').status,'queued');
+  assert.deepEqual(h.runningModels,[{...defaultModel,reasoningEffort:'balanced'}]);
+  assert.equal(h.prompts[0].requestId,requestId);
+  assert.equal(h.made,1);
 });
 
 test('不可用或未持久化的选模失败沿用任务事件，不入队也不回退',async t=>{

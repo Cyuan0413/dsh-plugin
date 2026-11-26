@@ -15,6 +15,13 @@ function parseModelSelection(value) {
   const {provider,model}=value;
   try{return {provider:text(provider,modelIdMaxLength),model:text(model,modelIdMaxLength)};}catch{throw new InvalidModelSelection();}
 }
+export class InvalidReasoningEffort extends Error {
+  constructor(){super(`reasoningEffort must be a non-blank DSH effort ID (up to ${modelIdMaxLength} characters)`);}
+}
+function parseReasoningEffort(value) {
+  if(value===undefined)return undefined;
+  try{return text(value,modelIdMaxLength);}catch{throw new InvalidReasoningEffort();}
+}
 export class InvalidAgentPreset extends Error {
   constructor(){super('agentPreset must be a non-blank DSH preset ID');}
 }
@@ -113,20 +120,59 @@ export class Tasks {
     const instruction=parent?text(a.instruction):[text(a.goal),`上下文：${a.context===undefined?'无':text(a.context)}`,`验收标准：${text(a.acceptance)}`].join('\n\n');
     const requestedAgentPreset=parent?undefined:parseAgentPreset(a.agentPreset);
     const model=parent?undefined:parseModelSelection(a.model);
+    const reasoningEffort=parent?undefined:parseReasoningEffort(a.reasoningEffort);
     if(a.notify!==undefined&&typeof a.notify!=='boolean')throw Error('notify must be boolean');
     const muted=a.notify===false;
     const id=digest(JSON.stringify([owner,text(a.idempotencyKey,128)]));
-    // The default keeps existing idempotency keys compatible.
-    const fingerprint=digest(JSON.stringify([workspaceId,parent?.id,instruction,...(model?[model]:[]),...(requestedAgentPreset===undefined?[]:[{agentPreset:requestedAgentPreset}]),...(muted?[{notify:false}]:[])]));
+    const fingerprint=digest(JSON.stringify([workspaceId,parent?.id,instruction,...(model?[model]:[]),...(requestedAgentPreset===undefined?[]:[{agentPreset:requestedAgentPreset}]),...(muted?[{notify:false}]:[]),...(reasoningEffort===undefined?[]:[{reasoningEffort}])]));
     const t=this.db.get('task',id);
     if(t&&t.fingerprint!==fingerprint)throw Error('Idempotency key already used for different input');
     if(this.locks.has(id))return this.locks.get(id);
     if(t && !['creating','submitting'].includes(t.status))return publicTask(t);
-    const promise=this.admit(t??{id,fingerprint,owner,workspaceId,sessionId:parent?.sessionId??randomUUID(),requestId:randomUUID(),revision:0,status:parent?'submitting':'creating',cursor:-1,...(model?{model}:{}),...(requestedAgentPreset===undefined?{}:{requestedAgentPreset})},instruction,Boolean(t),muted);
+    const promise=this.admit(t??{id,fingerprint,owner,workspaceId,sessionId:parent?.sessionId??randomUUID(),requestId:randomUUID(),revision:0,status:parent?'submitting':'creating',cursor:-1,...(model?{model}:{}),...(requestedAgentPreset===undefined?{}:{requestedAgentPreset}),...(reasoningEffort===undefined?{}:{reasoningEffort})},instruction,Boolean(t),muted);
     this.locks.set(id,promise);try{return await promise;}finally{this.locks.delete(id);}
   }
   finishAdmission(t,status,summary){
     delete t.instruction;this.db.transaction(()=>change(this.db,t,status,summary,Date.now(),true));return publicTask(t);
+  }
+  async applyModel(t){
+    const resolveAgent=async()=>{
+      const {agent,error}=await this.api.resolveAgent(t.sessionId);
+      if(error||!agent)throw Error('Session Agent unavailable');
+      return agent;
+    };
+    const {reasoningEffort}=t;
+    let agent,route=t.model??t.resolvedModel;
+    if(!route){
+      try{
+        agent=await resolveAgent();
+        const current=agent.model.current();
+        if(!current?.provider||!current.model)throw Error('No current session model');
+        route=t.resolvedModel={provider:current.provider,model:current.model};
+      }catch{return '无法确定目标会话原本使用的模型。请在 DSH 面板配置默认模型，或派发时指定模型；未提交指令。';}
+      // Pin the implicit route before applying the selection, so recovery does not re-read a changed default.
+      this.db.put('task',t);
+    }
+    const {provider,model}=route;
+    const selection={provider,model,...(reasoningEffort===undefined?{}:{reasoningEffort})};
+    const target=`${t.model?'指定模型':'会话默认模型'}（provider: ${JSON.stringify(provider)}，model: ${JSON.stringify(model)}）`;
+    try{
+      if(t.model&&!(await this.llm.listModels(provider)).some(entry=>entry.id===model))throw Error('Model not advertised');
+      await this.llm.resolveCallConfig(selection);
+    }catch(e){
+      if(reasoningEffort!==undefined&&e?.code==='UNSUPPORTED_REASONING_EFFORT'){
+        return `${target}不支持思考强度 ${JSON.stringify(reasoningEffort)}。请核对该模型可用的档位；未提交指令。`;
+      }
+      return `${target}不可用。请核对 DSH 的模型列表与提供方配置；未提交指令。`;
+    }
+    try{
+      // sessionController.selectModel would also save the profile default in DSH 0.2.2-rc.5.
+      agent??=await resolveAgent();
+      agent.model.select(selection);
+      // The DSH event must survive restart before SQLite records selection as applied.
+      if(!await this.sessions.flush(agent.session))throw Error('Session persistence unavailable');
+    }catch{return `无法为目标会话设置指定${reasoningEffort===undefined?'模型':'思考强度'}，请在 DSH 面板核对会话；未提交指令。`;}
+    t.modelApplied=true;this.db.put('task',t);
   }
   async admit(t,instruction,recovering,muted=false){
     const db=this.db;t.instruction=instruction;
@@ -171,27 +217,9 @@ export class Tasks {
       return this.finishAdmission(t,'failed',`${reason}；${admission}`);
     }
     t.status='submitting';db.put('task',t);
-    if(t.model&&!t.modelApplied){
-      const {provider,model}=t.model;
-      let failure;
-      try{
-        const models=await this.llm.listModels(provider);
-        if(!models.some(entry=>entry.id===model))throw Error('Model not advertised');
-        await this.llm.resolveCallConfig(t.model);
-      }catch{failure=`指定模型（provider: ${JSON.stringify(provider)}，model: ${JSON.stringify(model)}）不可用。请核对 DSH 的模型列表与提供方配置；未提交指令。`;}
-      if(!failure){
-        try{
-          // The Host Agent records a session-local choice. sessionController.selectModel
-          // would also save the profile default in DSH 0.2.2-rc.5.
-          const {agent,error}=await this.api.resolveAgent(t.sessionId);
-          if(error||!agent)throw Error('Session Agent unavailable');
-          agent.model.select(t.model);
-          // The DSH event must survive restart before SQLite records selection as applied.
-          if(!await this.sessions.flush(agent.session))throw Error('Session persistence unavailable');
-        }catch{failure='无法为目标会话设置指定模型，请在 DSH 面板核对会话；未提交指令。';}
-      }
+    if((t.model||t.reasoningEffort!==undefined)&&!t.modelApplied){
+      const failure=await this.applyModel(t);
       if(failure)return this.finishAdmission(t,'failed',failure);
-      t.modelApplied=true;db.put('task',t);
     }
     // Persist the actual session, confirmed preset, model application and request ID before prompt.
     // Ambiguous admission retries ONLY prompt with the same rpcId.

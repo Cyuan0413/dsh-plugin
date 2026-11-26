@@ -39,7 +39,7 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
 
 先用只读工具 `presets` 查看 DSH 当前可用的 Agent 预设。每项包含预设 ID（`id`）、显示名称（`name`）和当前默认标记（`isDefault`），也包括可用的自定义预设。内置预设使用 `standard`（Standard）、`cordis`（Creator）、`ptc`（PTC）和 `minimal`（Minimal）作为 ID，以列表实际返回为准。
 
-可以在 `dispatch` 中用可选的 `agentPreset` 和 `model` 为新会话指定预设和模型，例如：
+可以用 `dispatch` 的可选参数为新会话指定预设、模型和思考强度，例如：
 
 ```json
 {
@@ -48,13 +48,18 @@ dsh plugin --profile web add 'github:Xinglei-dev/dsh-plugin#path:/plugins/dsh-wo
   "acceptance": "简述目录用途，不修改文件",
   "idempotencyKey": "inspect-project-001",
   "agentPreset": "standard",
-  "model": { "provider": "deepseek-account", "model": "deepseek-v4-pro" }
+  "model": { "provider": "deepseek-account", "model": "deepseek-v4-pro" },
+  "reasoningEffort": "high"
 }
 ```
 
-`agentPreset` 填 `presets` 返回的 ID，不填则由 DSH 在创建会话时使用当前默认预设。`provider` 和内层 `model` 填 DSH 模型列表中的提供方 ID 和模型 ID，不填 `model` 则沿用默认模型。预设在创建会话时绑定，模型在首条指令入队前设置；两者都不改变 profile 默认值。`continue_task` 沿用原会话，不接收 `agentPreset` 或 `model`。
+- `agentPreset` 填 `presets` 返回的 ID，不填则使用 DSH 当前默认预设。
+- `model` 填 DSH 模型列表中的提供方 ID 和模型 ID，不填则使用新会话原本的模型。
+- `reasoningEffort` 填该模型支持的档位 ID，可在 DSH 的模型选择器中查看可用档位。也可只传思考强度，不传 `model`；不传强度则保持 DSH 的原有行为。
 
-`dispatch`、`status` 和 `dsh.task.updated` 的 `agentPreset` 表示 DSH 已确认的实际预设；旧任务可能没有这个字段。指定预设不存在、不可用、未获 DSH 确认或实际预设不符，或指定模型无法使用时，`dispatch` 返回 `failed`，可能留下一个空会话，但不会提交指令或回退到默认设置。修正参数后请用新的 `idempotencyKey` 派发。
+模型和思考强度从首条指令起生效，只作用于新会话，不改变 profile 默认值。`continue_task` 不接收这些选项，沿用原会话当时的设置。
+
+`dispatch`、`status` 和 `dsh.task.updated` 的 `agentPreset` 表示 DSH 已确认的实际预设；旧任务可能没有这个字段。无法绑定指定预设、使用指定模型或应用所选档位时，`dispatch` 返回 `failed`，可能留下空会话，但不会提交指令或回退到默认设置。修正参数后请用新的 `idempotencyKey` 派发。
 
 `completed` 表示 Agent 明确报告完成，不代替用户验收；只有轮次结束时返回 `turn_returned`。审批和追问在 DSH 面板处理。人工指令与派发指令进入同一轮时，可能显示 `review_required`，避免把后续聊天结果归给原任务。
 
