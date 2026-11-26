@@ -357,6 +357,55 @@ describe('configForms controller', () => {
     assert.equal(writes[0].ops[0].op, 'set');
     assert.equal(writes[0].ops[0].path[0], 'key');
   });
+
+  it('reads a describe result that is a list of rows', async () => {
+    const settings = {
+      async describe() {
+        return { ok: true, value: [{ ns: 'pairing-entry', value: { key: KEY }, revision: 1 }] };
+      },
+      async mutate() { return { ok: true }; },
+    };
+    const { slots } = mountClient({ configForms: undefined, remote: { settings } });
+    const section = slots.find((slot) => slot.options.name === 'settings.section');
+    render(section.component, { t: (key) => key });
+    await Promise.resolve();
+    await Promise.resolve();
+    const tree = render(section.component, { t: (key) => key });
+    assert.equal(input(tree).props.value, KEY);
+  });
+
+  it('reloads the key when the settings document gains the entry', async () => {
+    let listed = false;
+    let updated;
+    const settings = {
+      async describe() {
+        const namespaces = listed
+          ? [{ ns: 'pairing-entry', value: { key: KEY }, revision: 1 }]
+          : [{ ns: 'other' }];
+        return { ok: true, value: { writable: true, namespaces } };
+      },
+      async mutate() { return { ok: false }; },
+    };
+    const { slots } = mountClient({
+      configForms: undefined,
+      remote: {
+        settings,
+        $on(_event, callback) { updated = callback; return () => {}; },
+      },
+    });
+    const section = slots.find((slot) => slot.options.name === 'settings.section');
+    render(section.component, { t: (key) => key });
+    await Promise.resolve();
+    await Promise.resolve();
+    let tree = render(section.component, { t: (key) => key });
+    assert.equal(texts(tree).some((text) => text.includes('other')), true);
+    listed = true;
+    updated();
+    await Promise.resolve();
+    await Promise.resolve();
+    tree = render(section.component, { t: (key) => key });
+    assert.equal(input(tree).props.value, KEY);
+  });
 });
 
 describe('tab rendering', () => {

@@ -195,7 +195,10 @@ window.__ModuleLoader__.load({
         return react.createElement('p', { style: STYLE_HINT }, t('unavailable'));
       }
       if (snapshot.status === 'loading') return react.createElement('p', { style: STYLE_HINT }, t('loading'));
-      if (snapshot.status === 'unavailable') return react.createElement('p', { style: STYLE_HINT }, t('unavailable'));
+      if (snapshot.status === 'unavailable') {
+        const names = typeof snapshot.detail === 'string' && snapshot.detail !== '' ? ` (${snapshot.detail})` : '';
+        return react.createElement('p', { style: STYLE_HINT }, `${t('unavailable')}${names}`);
+      }
 
       const stored = typeof snapshot.value?.key === 'string' ? snapshot.value.key.trim() : '';
       const value = draft ?? stored;
@@ -340,13 +343,11 @@ window.__ModuleLoader__.load({
      * @returns `true` when a node description mentions `/entry page`.
      */
     function schemaMentionsEntry(schema) {
-      const refs = schema?.refs;
-      if (refs === null || typeof refs !== 'object') return false;
-      for (const node of Object.values(refs)) {
-        const description = node?.meta?.description;
-        if (typeof description === 'string' && description.includes('/entry page')) return true;
+      try {
+        return JSON.stringify(schema).includes('/entry page');
+      } catch (_error) {
+        return false;
       }
-      return false;
     }
 
     /**
@@ -398,10 +399,23 @@ window.__ModuleLoader__.load({
      * @param response - an RPC result, a document, or anything else.
      * @returns the document, or `undefined`.
      */
-    function documentOf(response) {
-      if (response?.ok === true && response.value?.namespaces) return response.value;
-      if (response?.namespaces) return response;
+    function asDocument(value) {
+      if (Array.isArray(value)) return { writable: true, namespaces: value };
+      if (Array.isArray(value?.namespaces)) return value;
+      if (Array.isArray(value?.entries)) return { writable: value.writable !== false, namespaces: value.entries };
       return undefined;
+    }
+
+    /**
+     * Unwrap a describe answer into `{ namespaces, writable }`.
+     * Accepts the RPC envelope `{ ok, value }`, a bare document, or a bare list of rows.
+     * @param response - an RPC result, a document, or anything else.
+     * @returns the document, or `undefined`.
+     */
+    function documentOf(response) {
+      if (response?.ok === true) return asDocument(response.value);
+      if (response?.ok === false) return undefined;
+      return asDocument(response);
     }
 
     /**
@@ -422,7 +436,12 @@ window.__ModuleLoader__.load({
         const ns = pickNamespace({ view: next });
         const row = next?.namespaces?.find((item) => item.ns === ns);
         if (!row) {
-          publish({ status: 'unavailable', writable: next?.writable === true });
+          const names = (next?.namespaces ?? []).map((item) => item?.ns).filter((ns) => typeof ns === 'string');
+          publish({
+            status: 'unavailable',
+            writable: next?.writable === true,
+            detail: names.slice(0, 8).join(', '),
+          });
           return;
         }
         publish({
@@ -450,6 +469,7 @@ window.__ModuleLoader__.load({
           listeners.add(listener);
           return () => { listeners.delete(listener); };
         },
+        reload() { return load(); },
         async mutate(ops, revision) {
           const ns = pickNamespace({ view: document });
           try {
@@ -488,8 +508,11 @@ window.__ModuleLoader__.load({
       } catch (_error) {
         describe = undefined;
       }
-      const settings = forms ? undefined : remoteSettings(ctx);
+      const settings = remoteSettings(ctx);
       const fallback = settings ? remoteForm(settings) : undefined;
+      if (fallback && typeof ctx.remote?.$on === 'function') {
+        ctx.effect(() => ctx.remote.$on('settings/document-updated', () => { void fallback.reload(); }));
+      }
 
       const wrapped = new Map();
       function formFor(ns) {
@@ -502,6 +525,11 @@ window.__ModuleLoader__.load({
           return fallback;
         }
         if (typeof controller?.getSnapshot !== 'function' || typeof controller?.mutate !== 'function') return fallback;
+        try {
+          if (controller.getSnapshot()?.status === 'unavailable') return fallback;
+        } catch (_error) {
+          return fallback;
+        }
         const form = wrap(controller);
         wrapped.set(ns, form);
         return form;
