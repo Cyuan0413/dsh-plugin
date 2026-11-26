@@ -202,7 +202,7 @@ describe('bundle shape', () => {
     const { exports, required, registration } = materialize();
     assert.equal(registration.id, 'dsh-pairing-entry');
     assert.deepEqual(required, ['react']);
-    assert.deepEqual(exports.inject, ['slots', 'locale']);
+    assert.deepEqual(exports.inject, ['slots', 'locale', 'remote', 'remote.settings']);
     assert.equal(typeof exports.apply, 'function');
   });
 

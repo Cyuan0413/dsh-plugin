@@ -313,10 +313,11 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Slot registration and locale copy. `configForms` is not a dependency:
-     * a DSH that does not provide it leaves this client pending forever.
+     * Slot registration, locale copy, and the settings RPC. `configForms` stays
+     * out of this list: a DSH that does not provide it leaves the client pending.
+     * `remote.settings` is declared because reading it otherwise throws.
      */
-    const inject = ['slots', 'locale'];
+    const inject = ['slots', 'locale', 'remote', 'remote.settings'];
 
     /**
      * Wrap a controller the way the Plugins page wraps one for a row slot.
@@ -383,9 +384,13 @@ window.__ModuleLoader__.load({
      * @returns the settings namespace, or `undefined`.
      */
     function remoteSettings(ctx) {
-      const settings = provided(ctx, 'remote')?.settings;
-      if (typeof settings?.describe !== 'function' || typeof settings?.mutate !== 'function') return undefined;
-      return settings;
+      try {
+        const settings = ctx.remote?.settings ?? provided(ctx, 'remote')?.settings;
+        if (typeof settings?.describe !== 'function' || typeof settings?.mutate !== 'function') return undefined;
+        return settings;
+      } catch (_error) {
+        return undefined;
+      }
     }
 
     /**
