@@ -104,7 +104,7 @@ key 的要求：
 
 ## 实现与依赖
 
-- 宿主端只读公开接口：`connection.requestRejection()`、`connection.authenticatedUrl()`、`webServer.register()`。启动 token 从 `authenticatedUrl()` 拼出的地址里取，上游改变 token 的传递方式会在加载阶段报错，不会悄悄返回旧值。
+- 宿主端读取启动 token 的公开地址：当前版本从 `webserver/entry-url` 收集，旧版本仍用 `connection.authenticatedUrl()`。信任围栏在旧版本走 `requestRejection()`，当前版本走 `connection.admit()`。入口路由声明 `auth: 'anonymous'`，书签可以在还没有 cookie 时到达。读不到 token 时条目保持运行并逐次请求返回 503，这样设置页仍能编辑密钥。
 - key 用 Schemastery 的 `volatile` 字段声明。这是配置页能读写它的前提：只展示和写入 volatile 字段。
 - 保存落到 profile patch；volatile 字段的变化由 Loader 提交到运行中的实例（不重载条目），插件监听 `loader/volatile-update` 后按新 key 重新注册路由。
 - 浏览器端是包内自带的 `lib/client.js`（`dsh.client` 声明），只依赖 `react`。它注册 `settings.section`（id 为 `pairing-entry`）。插件页按模块名 `dsh-pairing-entry` 把它匹配到对应的行，所以即使这一行位于 profile 的 bundle 里、而不是名为 `dsh-pairing-entry` 的卡片里，组件名称也是可点击的按钮。

@@ -13,11 +13,14 @@
  * the entry (the Loader commits the new reference into the running fiber), so the
  * route follows `loader/volatile-update` and re-registers under the new key.
  *
- * The only upstream surface this plugin reads is public: `authenticatedUrl()`
- * and `requestRejection()` on the Connection handle, and `register()` on the
- * Web server. The launch token itself is taken from the address
- * `authenticatedUrl()` builds, so a renamed or reshaped token fails the load
- * instead of silently serving a stale redirect.
+ * The launch token comes from a public address. Current DSH contributes that
+ * address on `webserver/entry-url`; older releases still expose it as
+ * `connection.authenticatedUrl()`. A request the trust fence rejects is
+ * answered 403, via `requestRejection()` on older releases and
+ * `connection.admit()` on current ones. The route is anonymous so a bookmark
+ * can arrive before a cookie exists. A token this process cannot read is
+ * logged and answered 503 per request: failing the entry would drop it from
+ * the settings document, and the key form would disappear with it.
  *
  * @module dsh-pairing-entry
  */
@@ -98,8 +101,31 @@ export function entryPath(key) {
   return `${ENTRY_PATH_PREFIX}${key}`;
 }
 
+/** Address used only to ask a contributor for the launch token. Its origin is never sent to a browser. */
+const TOKEN_PROBE = 'http://dsh.invalid/';
+
 /**
- * Read the launch token of the running process from the public Connection face.
+ * Read the single launch token carried by one contributed address.
+ * @param printed - absolute URL a contributor built.
+ * @returns the token.
+ * @throws {TypeError} when the address cannot be parsed or does not carry exactly one non-empty token.
+ */
+export function tokenFromPrinted(printed) {
+  let url;
+  try {
+    url = new URL(printed);
+  } catch (cause) {
+    throw new TypeError(`${name}: a launch address this plugin cannot parse`, { cause });
+  }
+  const tokens = url.searchParams.getAll(TOKEN_QUERY);
+  if (tokens.length !== 1 || tokens[0] === '') {
+    throw new TypeError(`${name}: a launch address did not report exactly one launch token; this DSH version changed how the token reaches the address`);
+  }
+  return tokens[0];
+}
+
+/**
+ * Read the launch token from the older Connection face.
  * @param connection - value of `ctx.connection`.
  * @returns the token carried by the address `authenticatedUrl()` builds.
  * @throws {TypeError} when the handle is gone, the call fails, or the address
@@ -111,21 +137,54 @@ export function launchTokenOf(connection) {
   }
   let printed;
   try {
-    printed = connection.authenticatedUrl('http://dsh.invalid/');
+    printed = connection.authenticatedUrl(TOKEN_PROBE);
   } catch (cause) {
     throw new TypeError(`${name}: connection.authenticatedUrl() failed, so the entry cannot learn the launch token`, { cause });
   }
-  let url;
+  return tokenFromPrinted(printed);
+}
+
+/**
+ * Read the launch token from whichever public face this process still has.
+ *
+ * Current DSH collects startup URLs with `webserver/entry-url` and no longer
+ * puts `authenticatedUrl` on Connection. The same probe address is used, so a
+ * contributor that only appends the token still yields one.
+ * @param ctx - plugin context.
+ * @returns the token.
+ * @throws {TypeError} when neither face contributes exactly one token.
+ */
+export function launchTokenFrom(ctx) {
+  if (typeof ctx?.connection?.authenticatedUrl === 'function') return launchTokenOf(ctx.connection);
+  const entries = [];
+  if (typeof ctx?.emit === 'function') ctx.emit(ctx.webServer, 'webserver/entry-url', TOKEN_PROBE, entries);
+  let cause;
+  for (const entry of entries) {
+    if (typeof entry?.url !== 'string') continue;
+    try {
+      return tokenFromPrinted(entry.url);
+    } catch (error) {
+      cause = error;
+    }
+  }
+  throw new TypeError(`${name}: webserver/entry-url did not contribute a launch token, so the entry cannot learn it`, { cause });
+}
+
+/**
+ * Status the trust fence assigns, or `undefined` when the request may continue.
+ * Older releases answer through `requestRejection`; current ones answer through `admit`.
+ * @param connection - Connection handle.
+ * @param req - the incoming request.
+ * @returns a rejection status, when one was decided.
+ */
+function rejectionStatus(connection, req) {
+  if (typeof connection?.requestRejection === 'function') return connection.requestRejection(req);
+  if (typeof connection?.admit !== 'function') return undefined;
   try {
-    url = new URL(printed);
-  } catch (cause) {
-    throw new TypeError(`${name}: connection.authenticatedUrl() returned an address this plugin cannot parse`, { cause });
+    return connection.admit(req)?.rejection;
+  } catch {
+    return undefined;
   }
-  const tokens = url.searchParams.getAll(TOKEN_QUERY);
-  if (tokens.length !== 1 || tokens[0] === '') {
-    throw new TypeError(`${name}: connection.authenticatedUrl() did not report exactly one launch token; this DSH version changed how the token reaches the address`);
-  }
-  return tokens[0];
 }
 
 /**
@@ -139,14 +198,15 @@ export function launchTokenOf(connection) {
  * cookie (version 1) and would otherwise make "already signed in" skip the token
  * exchange this page exists to perform.
  *
- * @param connection - Connection handle supplying the trust fence and token.
- * @param logger - logger for the one failure that can only happen at request
- * time.
+ * @param connection - Connection handle supplying the trust fence.
+ * @param logger - logger for the one failure that can only happen at request time.
+ * @param tokenOf - reads the current launch token; defaults to the older Connection face.
  * @returns an HTTP handler that owns its response.
  */
-export function createHandler({ connection, logger }) {
+export function createHandler({ connection, logger, tokenOf }) {
+  const readToken = tokenOf ?? (() => launchTokenOf(connection));
   return (req, res) => {
-    if (connection.requestRejection(req) === 403) {
+    if (rejectionStatus(connection, req) === 403) {
       res.writeHead(403, { 'cache-control': 'no-store' });
       res.end();
       return;
@@ -158,7 +218,7 @@ export function createHandler({ connection, logger }) {
     }
     let token;
     try {
-      token = launchTokenOf(connection);
+      token = readToken();
     } catch (error) {
       logger.error(error);
       res.writeHead(503, { 'cache-control': 'no-store' });
@@ -179,8 +239,9 @@ export function createHandler({ connection, logger }) {
  *
  * A missing or malformed key is a configuration state, not a load failure: the
  * entry stays alive and configurable (the Settings form is only offered for
- * running entries), it just serves no route. A launch token this DSH version
- * cannot read is a version mismatch and does fail the load.
+ * running entries), it just serves no route. A launch token this process
+ * cannot read is also not a load failure. The handler answers 503 until one
+ * appears, and the key form stays available.
  *
  * `key` is volatile, and a volatile-only config change does not reload this
  * entry: the Loader commits the new reference into the running fiber instead of
@@ -191,7 +252,11 @@ export function createHandler({ connection, logger }) {
  * @param config - validated {@link Config}.
  */
 export function apply(ctx, config) {
-  launchTokenOf(ctx.connection);
+  try {
+    launchTokenFrom(ctx);
+  } catch (error) {
+    ctx.logger.error(error);
+  }
 
   let served;
   const stop = () => {
@@ -214,7 +279,12 @@ export function apply(ctx, config) {
       dispose: ctx.webServer.register({
         kind: 'exact',
         path,
-        handler: createHandler({ connection: ctx.connection, logger: ctx.logger }),
+        auth: 'anonymous',
+        handler: createHandler({
+          connection: ctx.connection,
+          logger: ctx.logger,
+          tokenOf: () => launchTokenFrom(ctx),
+        }),
       }),
     };
   };

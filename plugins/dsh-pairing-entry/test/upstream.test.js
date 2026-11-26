@@ -25,6 +25,7 @@ const settingsSchema = await importSettingsSchema();
 const skip = cordis === undefined || connection === undefined;
 
 const KEY = 'Zx9Qm2Lr7Tb4Wc8Yd1Fg6Hj3Kn5Pp0Ss';
+const PROBE_TOKEN = 'upstream-probe-token-0123456789abcdef';
 
 /**
  * Response stand-in that records the handler's answer.
@@ -76,6 +77,13 @@ async function mountPairingEntry(config = { key: KEY }) {
   });
   await ctx.plugin({ name: 'client-connection', inject: connection.inject, apply: connection.apply, Config: connection.Config }, { cookieMaxAgeDays: 30 });
   assert.notEqual(ctx.get('connection'), undefined, 'upstream Connection did not activate');
+  if (typeof ctx.get('connection').authenticatedUrl !== 'function') {
+    ctx.on('webserver/entry-url', (baseUrl, entries) => {
+      const url = new URL(baseUrl);
+      url.searchParams.set('token', PROBE_TOKEN);
+      entries.push({ label: 'test', url: url.href, open: false });
+    });
+  }
   const captured = [];
   const fiber = ctx.plugin({
     name,
@@ -148,7 +156,9 @@ describe('real upstream Connection', {
   it('redirects a trusted loopback request to the real launch token', async () => {
     const { ctx, routes } = await mountPairingEntry();
     try {
-      const expected = new URL(ctx.connection.authenticatedUrl('http://dsh.invalid/')).searchParams.get('token');
+      const expected = typeof ctx.connection.authenticatedUrl === 'function'
+        ? new URL(ctx.connection.authenticatedUrl('http://dsh.invalid/')).searchParams.get('token')
+        : PROBE_TOKEN;
       const res = fakeResponse();
       await routes.get(`/entry/${KEY}`).handler({ method: 'GET', url: `/entry/${KEY}`, headers: { host: '127.0.0.1:3080' } }, res);
       assert.equal(res.status, 303);

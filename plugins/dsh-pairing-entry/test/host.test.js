@@ -103,6 +103,7 @@ function fakeContext({ connection = fakeConnection(), webServer = fakeWebServer(
       return () => handlers.splice(handlers.indexOf(handler), 1);
     },
     emit(event, ...args) {
+      if (event !== null && typeof event === 'object') event = args.shift();
       for (const handler of events.get(event) ?? []) handler(...args);
     },
   };
@@ -285,11 +286,45 @@ describe('apply', () => {
     }
   });
 
-  it('fails the load when the launch token cannot be read, before registering anything', () => {
+  it('stays loaded when the launch token cannot be read, and the route answers 503', () => {
     const ctx = fakeContext();
     ctx.connection = { authenticatedUrl: () => 'http://dsh.invalid/' };
-    assert.throws(() => apply(ctx, { key: KEY }), { message: /exactly one launch token/u });
-    assert.equal(ctx.webServer.attempted.length, 0);
+    assert.doesNotThrow(() => apply(ctx, { key: KEY }));
+    assert.equal(ctx.errors.length, 1);
+    const route = ctx.webServer.routes.get(`/entry/${KEY}`);
+    assert.equal(route.auth, 'anonymous');
+    const res = fakeResponse();
+    route.handler({ method: 'GET', headers: {} }, res);
+    assert.equal(res.status, 503);
+  });
+
+  it('reads the launch token from webserver/entry-url when Connection no longer builds it', () => {
+    const ctx = fakeContext();
+    ctx.connection = { admit: () => ({ peer: {} }) };
+    ctx.on('webserver/entry-url', (baseUrl, entries) => {
+      const url = new URL(baseUrl);
+      url.searchParams.set('token', TOKEN);
+      entries.push({ label: 'dsh web', url: url.href, open: true });
+    });
+    apply(ctx, { key: KEY });
+    assert.equal(ctx.errors.length, 0);
+    const route = ctx.webServer.routes.get(`/entry/${KEY}`);
+    assert.equal(route.auth, 'anonymous');
+    const res = fakeResponse();
+    route.handler({ method: 'GET', headers: {} }, res);
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.location, `../?token=${TOKEN}`);
+  });
+
+  it('refuses through connection.admit when requestRejection is gone', () => {
+    const res = fakeResponse();
+    createHandler({
+      connection: { admit: () => ({ rejection: 403 }) },
+      logger: { error() {} },
+      tokenOf: () => TOKEN,
+    })({ method: 'GET', headers: {} }, res);
+    assert.equal(res.status, 403);
+    assert.equal(res.headers.location, undefined);
   });
 
   it('follows a volatile key change without being reloaded', () => {
