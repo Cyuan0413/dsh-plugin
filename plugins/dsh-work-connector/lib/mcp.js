@@ -1,15 +1,16 @@
 import http from 'node:http';
 import {equal} from './network.js';
-import {eventName,InvalidAgentPreset,InvalidModelSelection,modelIdMaxLength,publicTask,WorkspaceSelectionError} from './tasks.js';
+import {eventName,InvalidAgentPreset,InvalidModelSelection,InvalidReasoningEffort,modelIdMaxLength,publicTask,WorkspaceSelectionError} from './tasks.js';
 const str={type:'string',minLength:1};
 const object=(properties,required)=>({type:'object',properties,required,additionalProperties:false});
 const modelId={...str,maxLength:modelIdMaxLength,pattern:'\\S'};
 const agentPreset={...str,pattern:'\\S',description:'Optional exact preset ID from presets for the new session. Omit to use the current DSH default.'};
 const modelSelection={...object({provider:{...modelId,description:'Exact DSH provider ID.'},model:{...modelId,description:'Exact model ID within that provider.'}},['provider','model']),description:'Optional model for the new session, including its first instruction. Omit to use the profile default.'};
+const reasoningEffort={...modelId,description:'Optional exact reasoning effort ID supported by the selected model. If model is omitted, use the model the new DSH session would normally use. Omit this field to leave reasoning unchanged.'};
 const notify={type:'boolean',default:true,description:'Set false to suppress webhook notifications for this task without changing its execution or status.'};
 const tools=[
   {name:'dispatch',description:'Create a DSH task in a permitted workspace. Provide exactly one of workspaceId or workspacePath (the exact absolute root directory on the DSH host; see workspaces). Reuse idempotencyKey on retry. An active connection-wide dsh.task.updated subscription covers new tasks automatically.',inputSchema:{
-    ...object({workspaceId:str,workspacePath:str,goal:str,context:str,acceptance:str,idempotencyKey:str,agentPreset,model:modelSelection,notify},['goal','acceptance','idempotencyKey']),
+    ...object({workspaceId:str,workspacePath:str,goal:str,context:str,acceptance:str,idempotencyKey:str,agentPreset,model:modelSelection,reasoningEffort,notify},['goal','acceptance','idempotencyKey']),
     oneOf:[{required:['workspaceId']},{required:['workspacePath']}],
   }},
   {name:'status',description:'Read one of your dispatched tasks.',inputSchema:object({taskId:str},['taskId'])},
@@ -30,7 +31,7 @@ export function endpoint({hop,owner,tasks,events}){
       let bytes=0;const parts=[];for await(const b of req){bytes+=b.length;if(bytes>65536)return json(413);parts.push(b);}
       const m=JSON.parse(Buffer.concat(parts));id=m.id??null;
       if(m.jsonrpc!=='2.0'||typeof m.method!=='string')return json(400);
-      const p=m.params||{};const cap={tools:{},events:{}};const info={name:'dsh-work-connector',version:'0.2.0'};
+      const p=m.params||{};const cap={tools:{},events:{}};const info={name:'dsh-work-connector',version:'0.3.0'};
       let result;
       if(m.method==='initialize')result={protocolVersion:['2025-03-26','2025-06-18','2025-11-25'].includes(p.protocolVersion)?p.protocolVersion:'2025-03-26',capabilities:cap,serverInfo:info};
       else if(m.method==='server/discover')result={resultType:'complete',supportedVersions:['2026-07-28'],capabilities:cap,serverInfo:info};
@@ -56,7 +57,7 @@ export function endpoint({hop,owner,tasks,events}){
       json(200,{jsonrpc:'2.0',id,result});
     }catch(e){
       const challengeFailed=e.rpcCode===-32015;
-      const selectionError=e instanceof InvalidAgentPreset||e instanceof InvalidModelSelection||e instanceof WorkspaceSelectionError;
+      const selectionError=e instanceof InvalidAgentPreset||e instanceof InvalidModelSelection||e instanceof InvalidReasoningEffort||e instanceof WorkspaceSelectionError;
       const message=challengeFailed?'Callback verification failed':selectionError?e.message:'Request rejected; check arguments, access and configuration';
       json(200,{jsonrpc:'2.0',id,error:{code:e.rpcCode??-32602,message,...(challengeFailed?{data:{reason:'challenge_failed'}}:{})}});
     }
